@@ -10,6 +10,6 @@ add_executable(SPM_assignment
     assigment1/include/hpc_helpers.hpp
     assigment1/Makefile
     assigment1/softmax_auto.cpp
-    assigment1/softmax_avx.cpp
-    assigment1/softmax_plain.cpp
+        assigment1/softmax_plain.cpp
+        assigment1/softmax_avx.cpp
 )

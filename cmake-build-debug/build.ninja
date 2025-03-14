@@ -56,15 +56,15 @@ build CMakeFiles/SPM_assignment.dir/assigment1/softmax_auto.cpp.obj: CXX_COMPILE
   OBJECT_DIR = CMakeFiles\SPM_assignment.dir
   OBJECT_FILE_DIR = CMakeFiles\SPM_assignment.dir\assigment1
 
-build CMakeFiles/SPM_assignment.dir/assigment1/softmax_avx.cpp.obj: CXX_COMPILER__SPM_assignment_unscanned_Debug C$:/Users/Utente/Desktop/Progetti$ personali/SPM-assignment/assigment1/softmax_avx.cpp || cmake_object_order_depends_target_SPM_assignment
-  DEP_FILE = CMakeFiles\SPM_assignment.dir\assigment1\softmax_avx.cpp.obj.d
+build CMakeFiles/SPM_assignment.dir/assigment1/softmax_plain.cpp.obj: CXX_COMPILER__SPM_assignment_unscanned_Debug C$:/Users/Utente/Desktop/Progetti$ personali/SPM-assignment/assigment1/softmax_plain.cpp || cmake_object_order_depends_target_SPM_assignment
+  DEP_FILE = CMakeFiles\SPM_assignment.dir\assigment1\softmax_plain.cpp.obj.d
   FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
   INCLUDES = -I"C:/Users/Utente/Desktop/Progetti personali/SPM-assignment/assigment1/include"
   OBJECT_DIR = CMakeFiles\SPM_assignment.dir
   OBJECT_FILE_DIR = CMakeFiles\SPM_assignment.dir\assigment1
 
-build CMakeFiles/SPM_assignment.dir/assigment1/softmax_plain.cpp.obj: CXX_COMPILER__SPM_assignment_unscanned_Debug C$:/Users/Utente/Desktop/Progetti$ personali/SPM-assignment/assigment1/softmax_plain.cpp || cmake_object_order_depends_target_SPM_assignment
-  DEP_FILE = CMakeFiles\SPM_assignment.dir\assigment1\softmax_plain.cpp.obj.d
+build CMakeFiles/SPM_assignment.dir/assigment1/softmax_avx.cpp.obj: CXX_COMPILER__SPM_assignment_unscanned_Debug C$:/Users/Utente/Desktop/Progetti$ personali/SPM-assignment/assigment1/softmax_avx.cpp || cmake_object_order_depends_target_SPM_assignment
+  DEP_FILE = CMakeFiles\SPM_assignment.dir\assigment1\softmax_avx.cpp.obj.d
   FLAGS = -g -std=gnu++14 -fdiagnostics-color=always
   INCLUDES = -I"C:/Users/Utente/Desktop/Progetti personali/SPM-assignment/assigment1/include"
   OBJECT_DIR = CMakeFiles\SPM_assignment.dir
@@ -78,7 +78,7 @@ build CMakeFiles/SPM_assignment.dir/assigment1/softmax_plain.cpp.obj: CXX_COMPIL
 #############################################
 # Link the executable SPM_assignment.exe
 
-build SPM_assignment.exe: CXX_EXECUTABLE_LINKER__SPM_assignment_Debug CMakeFiles/SPM_assignment.dir/assigment1/softmax_auto.cpp.obj CMakeFiles/SPM_assignment.dir/assigment1/softmax_avx.cpp.obj CMakeFiles/SPM_assignment.dir/assigment1/softmax_plain.cpp.obj
+build SPM_assignment.exe: CXX_EXECUTABLE_LINKER__SPM_assignment_Debug CMakeFiles/SPM_assignment.dir/assigment1/softmax_auto.cpp.obj CMakeFiles/SPM_assignment.dir/assigment1/softmax_plain.cpp.obj CMakeFiles/SPM_assignment.dir/assigment1/softmax_avx.cpp.obj
   FLAGS = -g
   LINK_LIBRARIES = -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32
   OBJECT_DIR = CMakeFiles\SPM_assignment.dir

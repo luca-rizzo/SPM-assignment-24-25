@@ -6,6 +6,18 @@
 #include <hpc_helpers.hpp>
 #include <avx_mathfun.h>
 
+// Static table for fast retrieval of the correct mask to properly
+// handle values of K that are not multiples of 8
+static const __m256i remaining_mask_table[7] = {
+    _mm256_set_epi32(0, 0, 0, 0, 0, 0, 0, -1),
+    _mm256_set_epi32(0, 0, 0, 0, 0, 0, -1, -1),
+    _mm256_set_epi32(0, 0, 0, 0, 0, -1, -1, -1),
+    _mm256_set_epi32(0, 0, 0, 0, -1, -1, -1, -1),
+    _mm256_set_epi32(0, 0, 0, -1, -1, -1, -1, -1),
+    _mm256_set_epi32(0, 0, -1, -1, -1, -1, -1, -1),
+    _mm256_set_epi32(0, -1, -1, -1, -1, -1, -1, -1)
+};
+
 // Horizontal sum using SSE3 (4 floats)
 inline float hsum_sse3(__m128 v) {
     __m128 shuf = _mm_movehdup_ps(v);
@@ -23,27 +35,9 @@ inline float hsum_avx(__m256 v) {
     return hsum_sse3(lo);
 }
 
-float avx_max(const float *data, uint64_t length) {
-    __m256 maxVec = _mm256_set1_ps(-INFINITY);
-    uint64_t i = 0;
-    for (i = 0; i + 8 <= length; i += 8) {
-        __m256 vec = _mm256_load_ps(&data[i]);
-        maxVec = _mm256_max_ps(maxVec, vec);
-    }
-
-    // **Gestione degli elementi rimanenti** (se length non è multiplo di 8)
-    alignas(32) float remaining[8] = {-INFINITY, -INFINITY, -INFINITY, -INFINITY,
-                                  -INFINITY, -INFINITY, -INFINITY, -INFINITY};
-    for (; i < length; i++) {
-        remaining[i % 8] = data[i];
-    }
-    __m256 vec = _mm256_load_ps(remaining);
-    maxVec = _mm256_max_ps(maxVec, vec);
-
-
+inline float unrolled_max_inside_reg(__m256 reg) {
     alignas(32) float tmp[8];
-
-    _mm256_store_ps(tmp, maxVec);
+    _mm256_store_ps(tmp, reg);
 
     float max_0 = tmp[0];
     float max_1 = tmp[1];
@@ -55,70 +49,77 @@ float avx_max(const float *data, uint64_t length) {
     max_3 = std::max(max_3, tmp[7]);
     max_0 = std::max(max_0, max_1);
     max_2 = std::max(max_2, max_3);
-
     return std::max(max_0, max_2);
+}
+
+float avx_max(const float *data, size_t length) {
+    __m256 max_reg = _mm256_set1_ps(-INFINITY);
+    size_t i = 0;
+    // Find the max value in groups of 8 floats
+    // We maintain the maximum at a stride of 8 positions
+    for (i = 0; i + 8 <= length; i += 8) {
+        __m256 reg_block = _mm256_load_ps(&data[i]);
+        max_reg = _mm256_max_ps(max_reg, reg_block);
+    }
+    size_t remaining = length - i;
+    // Handling of remaining elements that do not form complete groups of 8
+    if (remaining > 0) {
+        __m256i mask = remaining_mask_table[remaining - 1];
+        //load element using mask
+        __m256 remaining_reg = _mm256_maskload_ps(data + i, mask);
+        __m256 neg_inf_vec = _mm256_set1_ps(-INFINITY);
+        //use blend to maintain only significant element in the registry for in max search
+        __m256 vec = _mm256_blendv_ps(neg_inf_vec, remaining_reg, _mm256_castsi256_ps(mask));
+        max_reg = _mm256_max_ps(max_reg, vec);
+    }
+    return unrolled_max_inside_reg(max_reg);
 }
 
 void divide_output_by_sum(float *output, size_t K, float sum) {
     __m256 divisor = _mm256_set1_ps(sum);
-    for (size_t i = 0; i + 8 <= K; i += 8) {
+    size_t i;
+    for (i = 0; i + 8 <= K; i += 8) {
         __m256 reg_block = _mm256_loadu_ps(output + i);
         __m256 reg_block_res = _mm256_div_ps(reg_block, divisor);
         _mm256_storeu_ps(output + i, reg_block_res);
     }
-    for (size_t i = K - (K % 8); i < K; i++) {
-        output[i] /= sum;
+    size_t remaining = K - i;
+    if (remaining > 0) {
+        __m256i mask = remaining_mask_table[remaining - 1];
+        // load with mask
+        __m256 remaining_reg = _mm256_maskload_ps(output + i, mask);
+        __m256 reg_block_res = _mm256_div_ps(remaining_reg, divisor);
+        //store with mask to avoid overflow
+        _mm256_maskstore_ps(output + i, mask, reg_block_res);
     }
 }
-
-#if 0
-inline float avx_handle_remaining(const float *input, float *output, size_t K, __m256 max_vals, __m256 sum_vec) {
-    if (K % 8 != 0) {
-        alignas(32) float remaining[8] = {0, 0, 0, 0, 0, 0, 0, 0};
-        alignas(32) float present[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
-        for (size_t i = K - (K % 8); i < K; i++) {
-            remaining[i % 8] = input[i];
-            present[i % 8] = 1;
-        }
-        __m256 reg_block = _mm256_load_ps(remaining);
-        __m256 exp_vals = _mm256_sub_ps(reg_block, max_vals);
-        __m256 reg_block_res = exp256_ps(exp_vals);
-        _mm256_store_ps(remaining, reg_block_res);
-        for (size_t i = K - (K % 8); i < K; i++) {
-            output[i] = remaining[i % 8];
-        }
-        __m256 reg_present = _mm256_load_ps(present);
-        __m256 zero = _mm256_set1_ps(0.0f);
-        // create the mask considering elements LT zero
-        __m256 mask = _mm256_cmp_ps(reg_present, zero, _CMP_LT_OS);
-        __m256 blend = _mm256_blendv_ps(reg_block_res, zero, mask);
-        sum_vec = _mm256_add_ps(blend, sum_vec);
-    }
-    return hsum_avx(sum_vec);
-}
-#endif
 
 float calculate_output_and_sum(const float *input, float *output, size_t K, float max_val) {
-    __m256 max_vals = _mm256_set1_ps(max_val);
-    __m256 sum_vec = _mm256_setzero_ps();
-    for (size_t i = 0; i + 8 <= K; i += 8) {
-        __m256 reg_block = _mm256_loadu_ps(input + i);
-        __m256 exp_vals = _mm256_sub_ps(reg_block, max_vals);
-        __m256 reg_block_res = exp256_ps(exp_vals);
-        _mm256_storeu_ps(output + i, reg_block_res);
-        sum_vec = _mm256_add_ps(reg_block_res, sum_vec);
+    __m256 max_reg = _mm256_set1_ps(max_val);
+    __m256 sum_reg = _mm256_setzero_ps();
+    size_t i;
+    for (i = 0; i + 8 <= K; i += 8) {
+        __m256 current_reg = _mm256_loadu_ps(input + i);
+        // Subtraction of max and exponentiation
+        __m256 res_reg = exp256_ps(_mm256_sub_ps(current_reg, max_reg));
+        _mm256_storeu_ps(output + i, res_reg);
+        sum_reg = _mm256_add_ps(res_reg, sum_reg);
     }
-    //simple handle remaining
-    float sum = hsum_avx(sum_vec);
-    for (size_t i = K - (K % 8); i < K; i++) {
-        output[i] = std::exp(input[i] - max_val);
-        sum += output[i];
+    size_t remaining = K - i;
+    if (remaining > 0) {
+        __m256i mask = remaining_mask_table[remaining - 1];
+        __m256 remaining_reg = _mm256_maskload_ps(input + i, mask);
+        __m256 res_reg = exp256_ps(_mm256_sub_ps(remaining_reg, max_reg));
+        _mm256_maskstore_ps(output + i, mask, res_reg);
+        //for sum we need to reset to 0 non-relevant value
+        __m256 zero_vec = _mm256_set1_ps(0);
+        __m256 vec = _mm256_blendv_ps(zero_vec, res_reg, _mm256_castsi256_ps(mask));
+        sum_reg = _mm256_add_ps(sum_reg, vec);
     }
-    return sum;
+    return hsum_avx(sum_reg);
 }
 
 void softmax_avx(const float *input, float *output, size_t K) {
-    // Find the maximum to stabilize the computation of the exponential
     float max_val = avx_max(input, K);
     float sum = calculate_output_and_sum(input, output, K, max_val);
     divide_output_by_sum(output, K, sum);
