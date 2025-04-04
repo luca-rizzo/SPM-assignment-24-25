@@ -28,8 +28,5 @@ clean:
 cleanall: clean
 	-rm -fr $(TARGET)
 
-diff_outputs: cleanall $(TARGET)
-	./diff_outputs.sh $(TARGET)
-
 launch_benchmark: cleanall $(TARGET)
-	./run_benchmark.sh $(TARGET)
+	./run_benchmark.sh
