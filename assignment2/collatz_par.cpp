@@ -52,23 +52,35 @@ std::pair<long, long> parseRange(const std::string &rangeStr) {
 
     if (!std::regex_match(rangeStr, match, pattern)) {
         std::cerr << "Not valid range format: " << rangeStr << std::endl;
-        exit(EXIT_FAILURE);
+        std::exit(EXIT_FAILURE);
     }
     long start = std::stol(match[1].str());
     long end = std::stol(match[2].str());
     return {start, end};
 }
 
-RunningParam parseRunningParam(int argc, char *argv[]) {
+int parse_int(const char *arg, const std::string &option) {
+    try {
+        return std::stol(arg);
+    } catch (const std::invalid_argument &e) {
+        std::cerr << "Invalid argument for " << option << ": must be an integer." << std::endl;
+        std::exit(EXIT_FAILURE);
+    } catch (const std::out_of_range &e) {
+        std::cerr << "Out of range value for " << option << ": too big for long." << std::endl;
+        std::exit(EXIT_FAILURE);
+    }
+}
+
+RunningParam parse_running_param(int argc, char *argv[]) {
     int opt;
     RunningParam runningParam{16, 1, STATIC_BLOCK_CYCLING};
     while ((opt = getopt(argc, argv, "n:c:dst")) != EOF) {
         switch (opt) {
             case 'n':
-                runningParam.num_threads = std::stol(optarg);
+                runningParam.num_threads = parse_int(optarg, "-n");
                 break;
             case 'c':
-                runningParam.task_size = std::stol(optarg);
+                runningParam.task_size = parse_int(optarg, "-c");
                 break;
             case 'd':
                 runningParam.scheduling_policy = DYNAMIC_WITH_INDEX;
@@ -194,7 +206,7 @@ void execute_dynamic_TP_scheduling(int task_size, ThreadPool &tp,
 }
 
 int main(int argc, char **argv) {
-    RunningParam running_param = parseRunningParam(argc, argv);
+    RunningParam running_param = parse_running_param(argc, argv);
     //debug_run_parsed_param(runningParam);
     TIMERSTART(collatz_par);
     switch (running_param.scheduling_policy) {
