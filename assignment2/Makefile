@@ -1,7 +1,6 @@
 CXX                = g++ -std=c++17
 OPTFLAGS	   = -O3
 AUTOFLAGS          = -march=native -ffast-math -funroll-loops
-AVXFLAGS           = -mavx
 CXXFLAGS          += -Wall 
 INCLUDES	   = -I. -I./include
 LIBS               = #-pthread -fopenmp
@@ -11,13 +10,7 @@ TARGET             = $(SOURCES:.cpp=)
 .PHONY: all clean cleanall diff_outputs launch_benchmark
 
 %: %.cpp
-	$(CXX) $(INCLUDES) $(CXXFLAGS) $(OPTFLAGS) -o $@ $< $(LIBS)
-
-# For files with _avx in their name, append flags to CXXFLAGS
-%_avx: CXXFLAGS += ${AVXFLAGS}
-
-# For files with _auto in their name, append flags to CXXFLAGS
-%_auto: CXXFLAGS += ${AUTOFLAGS}
+	$(CXX) $(INCLUDES) $(CXXFLAGS) $(OPTFLAGS) $(AUTOFLAGS) -o $@ $< $(LIBS)
 
 all: $(TARGET)
 
@@ -30,3 +23,6 @@ cleanall: clean
 
 launch_benchmark: cleanall $(TARGET)
 	./run_benchmark.sh
+
+launch_simple_benchmark: cleanall $(TARGET)
+	./run_simple_benchmark.sh
