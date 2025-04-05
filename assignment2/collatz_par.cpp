@@ -134,7 +134,7 @@ long calculate_collatz_length(long n) {
 void execute_static_scheduling(int task_size, int num_threads,
                                const pair<long, long> &range) {
     auto block_cyclic = [&](int threadId) {
-        const long offset = threadId * task_size;
+        const long offset = threadId * task_size + range.first;
         const long stride = num_threads * task_size;
         long local_maximum = 0;
         //starting from offset the thread pick a chunk of task_size elem every stride elem
@@ -209,7 +209,7 @@ void execute_dynamic_TP_scheduling(int task_size, ThreadPool &tp,
     for (long start = range.first; start < range.second; start += task_size) {
         long end_task_index = min(start + task_size, range.second);
         local_maximum_futures.emplace_back(
-            tp.enqueue([&]() {
+            tp.enqueue([=, &calculate_task_maximum]() {
                 return calculate_task_maximum({start, end_task_index});
             }));
     }
