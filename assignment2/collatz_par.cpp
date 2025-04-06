@@ -5,10 +5,9 @@
 #include <string>
 #include <unistd.h>
 #include <vector>
-#include <regex>
-
 #include "hpc_helpers.hpp"
 #include "threadPool.hpp"
+#include "parse_utility.hpp"
 
 using namespace std;
 
@@ -38,40 +37,14 @@ public:
         this->current_index = range.first;
     }
 
-    // interval [) open on the right, close on the left
     pair<long, long> next_chunk() {
         unique_lock<mutex> lock(_mutex);
         int start_index_chunk = current_index;
-        int end_index_chunk = min(current_index + task_size, range.second);
-        current_index = end_index_chunk;
+        int end_index_chunk = min(current_index + task_size - 1, range.second);
+        current_index = end_index_chunk + 1;
         return {start_index_chunk, end_index_chunk};
     }
 };
-
-pair<long, long> parseRange(const string &rangeStr) {
-    regex pattern(R"(^\s*(\d+)\s*-\s*(\d+)\s*$)");
-    smatch match;
-
-    if (!regex_match(rangeStr, match, pattern)) {
-        cerr << "Not valid range format: " << rangeStr << endl;
-        exit(EXIT_FAILURE);
-    }
-    long start = stol(match[1].str());
-    long end = stol(match[2].str());
-    return {start, end};
-}
-
-int parse_int(const char *arg, const string &option) {
-    try {
-        return stol(arg);
-    } catch (const invalid_argument &e) {
-        cerr << "Invalid argument for " << option << ": must be an integer." << endl;
-        exit(EXIT_FAILURE);
-    } catch (const out_of_range &e) {
-        cerr << "Out of range value for " << option << ": too big for long." << endl;
-        exit(EXIT_FAILURE);
-    }
-}
 
 RunningParam parse_running_param(int argc, char *argv[]) {
     int opt;
@@ -93,6 +66,9 @@ RunningParam parse_running_param(int argc, char *argv[]) {
             case 's':
                 runningParam.scheduling_policy = STATIC_BLOCK_CYCLING;
                 break;
+            default:
+                cerr << "Unknown option " << opt << endl;
+                exit(EXIT_FAILURE);
         }
     }
     for (int i = optind; i < argc; ++i) {
@@ -110,7 +86,7 @@ void debug_run_parsed_param(const RunningParam &running_param) {
     }
 }
 
-long reduce_to_global_maximum(vector<future<long> > &local_maximum_futures) {
+long reduce_to_global_maximum(vector<future<long>>& local_maximum_futures) {
     long global_maximum = 0;
     for (auto &future: local_maximum_futures) {
         global_maximum = max(global_maximum, future.get());
@@ -137,11 +113,11 @@ void execute_static_scheduling(int task_size, int num_threads,
         const long offset = threadId * task_size + range.first;
         const long stride = num_threads * task_size;
         long local_maximum = 0;
-        //starting from offset the thread pick a chunk of task_size elem every stride elem
-        for (long i = offset; i < range.second; i += stride) {
-            long last_index = min(i + task_size, range.second);
-            for (long j = i; j < last_index; j++) {
-                local_maximum = max(local_maximum, calculate_collatz_length(j));
+
+        for (long i = offset; i <= range.second; i += stride) {
+            long last_index = std::min(i + task_size - 1, range.second);
+            for (long j = i; j <= last_index; j++) {
+                local_maximum = std::max(local_maximum, calculate_collatz_length(j));
             }
         }
         return local_maximum;
@@ -170,11 +146,11 @@ void execute_dynamic_index_scheduling(int task_size, int num_threads,
         pair<long, long> currentChunk;
         do {
             currentChunk = chunkDispatcher.next_chunk();
-            for (long i = currentChunk.first; i < currentChunk.second; i += 1) {
+            for (long i = currentChunk.first; i <= currentChunk.second; i += 1) {
                 long collatz_length = calculate_collatz_length(i);
                 local_max = max(local_max, collatz_length);
             }
-        } while (currentChunk.first != currentChunk.second);
+        } while (currentChunk.first <= currentChunk.second);
         return local_max;
     };
     vector<future<long> > local_maximum_futures;
@@ -198,7 +174,7 @@ void execute_dynamic_TP_scheduling(int task_size, ThreadPool &tp,
                                    const pair<long, long> &range) {
     auto calculate_task_maximum = [](const pair<long, long> &task_range) {
         long local_maximum = 0;
-        for (long i = task_range.first; i < task_range.second; i += 1) {
+        for (long i = task_range.first; i <= task_range.second; ++i) {
             long collatz_length = calculate_collatz_length(i);
             local_maximum = max(local_maximum, collatz_length);
         }
@@ -206,12 +182,11 @@ void execute_dynamic_TP_scheduling(int task_size, ThreadPool &tp,
     };
 
     vector<future<long> > local_maximum_futures;
-    for (long start = range.first; start < range.second; start += task_size) {
-        long end_task_index = min(start + task_size, range.second);
+    for (long start = range.first; start <= range.second; start += task_size) {
+        long end_task_index = min(start + task_size - 1, range.second);
         local_maximum_futures.emplace_back(
-            tp.enqueue([=, &calculate_task_maximum]() {
-                return calculate_task_maximum({start, end_task_index});
-            }));
+            tp.enqueue(calculate_task_maximum, std::make_pair(start, end_task_index))
+        );
     }
 
     long global_maximum = reduce_to_global_maximum(local_maximum_futures);

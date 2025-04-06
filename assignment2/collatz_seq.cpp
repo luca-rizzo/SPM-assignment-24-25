@@ -1,8 +1,7 @@
 #include <iostream>
-#include <regex>
 #include <string>
-
 #include "hpc_helpers.hpp"
+#include "parse_utility.hpp"
 
 long calculate_collatz_length(long n) {
     if (n < 1) {
@@ -17,18 +16,7 @@ long calculate_collatz_length(long n) {
     return collatz_length;
 }
 
-std::pair<long, long> parseRange(const std::string &rangeStr) {
-    std::regex pattern(R"(^\s*(\d+)\s*-\s*(\d+)\s*$)");
-    std::smatch match;
 
-    if (!std::regex_match(rangeStr, match, pattern)) {
-        std::cerr << "Not valid range format: " << rangeStr << std::endl;
-        exit(EXIT_FAILURE);
-    }
-    long start = std::stol(match[1].str());
-    long end = std::stol(match[2].str());
-    return {start, end};
-}
 
 long find_max_collatz_seq_in_range(std::pair<long, long> range) {
     long global_max = 0;
