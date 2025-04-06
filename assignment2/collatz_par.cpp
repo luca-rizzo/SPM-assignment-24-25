@@ -86,6 +86,7 @@ void debug_run_parsed_param(const RunningParam &running_param) {
     }
 }
 
+// Get in input a vector of future and return the maximum values
 long reduce_to_global_maximum(vector<future<long>>& local_maximum_futures) {
     long global_maximum = 0;
     for (auto &future: local_maximum_futures) {
@@ -113,19 +114,22 @@ void execute_static_scheduling(int task_size, int num_threads,
         const long offset = threadId * task_size + range.first;
         const long stride = num_threads * task_size;
         long local_maximum = 0;
-
+        //each worker will process task_size elem every stride elem
         for (long i = offset; i <= range.second; i += stride) {
             long last_index = std::min(i + task_size - 1, range.second);
+            //process task (composed of at most task_size elem)
             for (long j = i; j <= last_index; j++) {
                 local_maximum = std::max(local_maximum, calculate_collatz_length(j));
             }
         }
         return local_maximum;
     };
+    //create threads and task
     vector<future<long> > local_maximum_futures;
     vector<thread> threads;
     for (int thread_id = 0; thread_id < num_threads; ++thread_id) {
         std::packaged_task<long(int)> thread_task(block_cyclic);
+        //save futures in vector to retrieve the local maximum later
         local_maximum_futures.emplace_back(thread_task.get_future());
         threads.emplace_back(std::move(thread_task), thread_id);
     }
@@ -145,7 +149,9 @@ void execute_dynamic_index_scheduling(int task_size, int num_threads,
         long local_max = 0;
         pair<long, long> currentChunk;
         do {
+            //extract a chunk from the shared concurrent structure
             currentChunk = chunkDispatcher.next_chunk();
+            //process task (composed of at most task_size elem)
             for (long i = currentChunk.first; i <= currentChunk.second; i += 1) {
                 long collatz_length = calculate_collatz_length(i);
                 local_max = max(local_max, collatz_length);
@@ -153,10 +159,12 @@ void execute_dynamic_index_scheduling(int task_size, int num_threads,
         } while (currentChunk.first <= currentChunk.second);
         return local_max;
     };
+    //create threads and task
     vector<future<long> > local_maximum_futures;
     vector<thread> threads;
     for (int i = 0; i < num_threads; ++i) {
         std::packaged_task<long()> thread_task(dynamic_index);
+        //save futures in vector to retrieve the local maximum later
         local_maximum_futures.emplace_back(thread_task.get_future());
         threads.emplace_back(std::move(thread_task));
     }
@@ -174,6 +182,7 @@ void execute_dynamic_TP_scheduling(int task_size, ThreadPool &tp,
                                    const pair<long, long> &range) {
     auto calculate_task_maximum = [](const pair<long, long> &task_range) {
         long local_maximum = 0;
+        //process the task (range) passed as input and return maximum within a task
         for (long i = task_range.first; i <= task_range.second; ++i) {
             long collatz_length = calculate_collatz_length(i);
             local_maximum = max(local_maximum, collatz_length);
@@ -181,6 +190,8 @@ void execute_dynamic_TP_scheduling(int task_size, ThreadPool &tp,
         return local_maximum;
     };
 
+    //divide the full range in sub-range of task_size elem and submit task to threadPool,
+    //saving the futures returned
     vector<future<long> > local_maximum_futures;
     for (long start = range.first; start <= range.second; start += task_size) {
         long end_task_index = min(start + task_size - 1, range.second);
