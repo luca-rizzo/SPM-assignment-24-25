@@ -1,6 +1,7 @@
 
 #ifndef UTILITY_H
 #define UTILITY_H
+#include <getopt.h>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -8,29 +9,21 @@
 
 using namespace std;
 
-inline pair<long, long> parseRange(const string &rangeStr) {
-    regex pattern(R"(^\s*(\d+)\s*-\s*(\d+)\s*$)");
-    smatch match;
+enum SchedulingPolicy {
+    STATIC_BLOCK_CYCLING,
+    DYNAMIC_THREAD_POOL,
+    DYNAMIC_WITH_INDEX
+};
 
-    if (!regex_match(rangeStr, match, pattern)) {
-        cerr << "Not valid range format: " << rangeStr << endl;
-        exit(EXIT_FAILURE);
-    }
-    long start = stol(match[1].str());
-    long end = stol(match[2].str());
-    return {start, end};
-}
+struct RunningParam {
+    int num_threads;
+    int task_size;
+    SchedulingPolicy scheduling_policy;
+    vector<pair<long, long> > ranges;
+};
 
-inline int parse_int(const char *arg, const string &option) {
-    try {
-        return stol(arg);
-    } catch (const invalid_argument &e) {
-        cerr << "Invalid argument for " << option << ": must be an integer." << endl;
-        exit(EXIT_FAILURE);
-    } catch (const out_of_range &e) {
-        cerr << "Out of range value for " << option << ": too big for long." << endl;
-        exit(EXIT_FAILURE);
-    }
-}
+pair<long, long> parseRange(const string &rangeStr);
+
+RunningParam parse_running_param(int argc, char *argv[]);
 
 #endif //UTILITY_H
