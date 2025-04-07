@@ -1,4 +1,3 @@
-
 #include "parse_utility.hpp"
 #include <getopt.h>
 #include <iostream>

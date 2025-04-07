@@ -1,11 +1,8 @@
-
 #ifndef UTILITY_H
 #define UTILITY_H
-#include <getopt.h>
-#include <iostream>
 #include <string>
 #include <utility>
-#include <regex>
+#include <vector>
 
 using namespace std;
 
