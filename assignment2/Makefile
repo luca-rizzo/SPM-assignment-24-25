@@ -1,6 +1,5 @@
 CXX                = g++ -std=c++17
-OPTFLAGS	   = -O3
-AUTOFLAGS          = -march=native -ffast-math -funroll-loops
+OPTFLAGS	   = -O3 -march=native -ffast-math
 CXXFLAGS          += -Wall 
 INCLUDES	   = -I. -I./include
 LIBS               = #-pthread -fopenmp
@@ -23,6 +22,3 @@ cleanall: clean
 
 launch_benchmark: cleanall $(TARGET)
 	./run_benchmark.sh
-
-launch_simple_benchmark: cleanall $(TARGET)
-	./run_simple_benchmark.sh
