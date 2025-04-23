@@ -18,6 +18,8 @@
 #include <cmdline.hpp>
 #include <utility.hpp>
 
+#include "hpc_helpers.hpp"
+
 int main(int argc, char *argv[]) {
     if (argc < 2) {
         usage(argv[0]);
@@ -26,7 +28,7 @@ int main(int argc, char *argv[]) {
     // parse command line arguments and set some global variables
     long start=parseCommandLine(argc, argv);
     if (start<0) return -1;
-  
+	TIMERSTART(minizseq)
 	bool success = true;
 	while(argv[start]) {
 		size_t filesize=0;
@@ -41,6 +43,7 @@ int main(int argc, char *argv[]) {
 		printf("Exiting with (some) Error(s)\n");
 		return -1;
 	}
+	TIMERSTOP(minizseq)
 	printf("Exiting with Success\n");
 	return 0;
 }

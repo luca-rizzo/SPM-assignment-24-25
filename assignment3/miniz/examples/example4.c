@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <limits.h>
 
+#include "miniz.h"
+
 typedef unsigned char uint8;
 typedef unsigned short uint16;
 typedef unsigned int uint;
