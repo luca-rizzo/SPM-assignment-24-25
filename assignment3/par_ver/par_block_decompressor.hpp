@@ -7,7 +7,6 @@
 #include <vector>
 #include <filesystem>
 #include <fstream>
-#include <unistd.h>
 #include "cmdline_param_parser.hpp"
 #include "miniz.h"
 #include "par_block_compressor.hpp"
@@ -29,16 +28,16 @@ typedef struct DecompBlockHeaderInfo {
 inline vector<DecompBlockHeaderInfo> read_header(unsigned char *ptr) {
     vector<DecompBlockHeaderInfo> blocks;
     unsigned char *cur = ptr;
-    uint32_t num_blocks = *reinterpret_cast<uint32_t *>(cur);
-    cur += sizeof(uint32_t);
+    size_t num_blocks = *reinterpret_cast<size_t *>(cur);
+    cur += sizeof(size_t);
     blocks.resize(num_blocks);
-    for (uint32_t i = 0; i < num_blocks; ++i) {
-        uint32_t comp_size = *reinterpret_cast<uint32_t *>(cur);
-        cur += sizeof(uint32_t);
-        uint32_t orig_size = *reinterpret_cast<uint32_t *>(cur);
-        cur += sizeof(uint32_t);
-        uint32_t offset = *reinterpret_cast<uint32_t *>(cur);
-        cur += sizeof(uint32_t);
+    for (size_t i = 0; i < num_blocks; ++i) {
+        size_t comp_size = *reinterpret_cast<size_t *>(cur);
+        cur += sizeof(size_t);
+        size_t orig_size = *reinterpret_cast<size_t *>(cur);
+        cur += sizeof(size_t);
+        size_t offset = *reinterpret_cast<size_t *>(cur);
+        cur += sizeof(size_t);
         blocks[i] = DecompBlockHeaderInfo{
             orig_size,
             comp_size,
@@ -63,7 +62,7 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
     vector<DecompBlockHeaderInfo> block_header = read_header(ptr);
     vector<DecompBlockInfo> decompr_blocks;
     decompr_blocks.resize(block_header.size());
-    size_t header_size = sizeof(uint32_t) + block_header.size() * (sizeof(uint32_t) * 3);
+    size_t header_size = sizeof(size_t) + block_header.size() * (sizeof(size_t) * 3);
     unsigned char *data_ptr = ptr + header_size;
     std::atomic_bool any_error(false);
 #pragma omp taskloop grainsize(1) nogroup shared(decompr_blocks, block_header, data_ptr, any_error)

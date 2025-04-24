@@ -27,15 +27,15 @@ inline size_t compute_block_size(size_t filesize) {
 }
 
 inline void write_header(const vector<CompBlockInfo> &blocks, std::ofstream &outFile) {
-    uint32_t num_blocks = blocks.size();
-    outFile.write(reinterpret_cast<const char *>(&num_blocks), sizeof(uint32_t));
-    uint32_t offset = 0;
+    size_t num_blocks = blocks.size();
+    outFile.write(reinterpret_cast<const char *>(&num_blocks), sizeof(size_t));
+    size_t offset = 0;
     for (const auto &blk: blocks) {
-        uint32_t comp_size = blk.comp_block_size;
-        uint32_t orig_size = blk.orig_block_size;
-        outFile.write(reinterpret_cast<const char *>(&comp_size), sizeof(uint32_t));
-        outFile.write(reinterpret_cast<const char *>(&orig_size), sizeof(uint32_t));
-        outFile.write(reinterpret_cast<const char *>(&offset), sizeof(uint32_t));
+        size_t comp_size = blk.comp_block_size;
+        size_t orig_size = blk.orig_block_size;
+        outFile.write(reinterpret_cast<const char *>(&comp_size), sizeof(size_t));
+        outFile.write(reinterpret_cast<const char *>(&orig_size), sizeof(size_t));
+        outFile.write(reinterpret_cast<const char *>(&offset), sizeof(size_t));
         offset += blk.comp_block_size;
     }
 }
