@@ -58,6 +58,7 @@ void do_work(const string &file_name, const CompressionParams &cpar) {
 
 int main(int argc, char *argv[]) {
     CompressionParams cpar = parseCommandLine(argc, argv);
+    
     TIMERSTART(minizpar)
 #pragma omp parallel
     {

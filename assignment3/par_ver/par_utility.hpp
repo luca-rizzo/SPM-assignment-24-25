@@ -7,6 +7,17 @@
 #include <sys/stat.h>
 #include "cmdline_param_parser.hpp"
 
+
+
+inline void log_msg(LogLevel level, const CompressionParams& cpar, const char* fmt, ...) {
+    if (cpar.quite_mode >= level) {
+        va_list args;
+        va_start(args, fmt);
+        std::vfprintf(stderr, fmt, args);
+        va_end(args);
+    }
+}
+
 // map the file pointed by filepath in memory
 // if size is zero, it looks for file size
 // if everything is ok, it returns the memory pointer ptr

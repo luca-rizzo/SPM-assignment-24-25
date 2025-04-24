@@ -2,6 +2,7 @@
 #define PAR_BLOCK_COMPRESSOR_H
 #include <vector>
 #include <atomic>
+#include <cstdarg>
 #include <fcntl.h>
 #include <string>
 #include <omp.h>
@@ -23,7 +24,7 @@ inline size_t compute_block_size(size_t filesize) {
 
     size_t block_size = filesize / (num_threads);
 
-    return block_size;
+    return ((block_size + 4095) / 4096) * 4096;
 }
 
 inline void write_header(const vector<CompBlockInfo> &blocks, std::ofstream &outFile) {
@@ -47,9 +48,8 @@ static inline bool block_compress(const string &filename, const CompressionParam
     size_t filesize = 0;
     unsigned char *ptr = nullptr;
     if (!mapFile(filename.c_str(), filesize, ptr, cpar)) {
-        if (cpar.quite_mode >= 1)
-            std::fprintf(stderr, "mapFile %s failed\n", filename.c_str());
-        exit(EXIT_FAILURE);
+        log_msg(ERROR, cpar, "mapFile %s failed\n", filename.c_str());
+        return false;
     }
     vector<CompBlockInfo> blocks;
     size_t block_size = compute_block_size(filesize);
@@ -66,21 +66,23 @@ static inline bool block_compress(const string &filename, const CompressionParam
         // allocate memory to store compressed data in memory
         auto *ptrOut = new unsigned char[cmp_len];
         if (compress(ptrOut, &cmp_len, inPtr, eff_block_size) != Z_OK) {
-            if (cpar.quite_mode >= 1)
-                std::fprintf(stderr, "Error compressing block %lu of file %s\n", i, filename.c_str());
+            log_msg(ERROR, cpar, "Error compressing block %lu of file %s\n", i, filename.c_str());
             delete [] ptrOut;
             any_error = true;
         } else {
             size_t block_index = i / block_size;
+            //printf("Thread %d compress block %lu of file %s\n", omp_get_thread_num(), block_index, filename.c_str());
             blocks[block_index] = CompBlockInfo{cmp_len, eff_block_size, ptrOut};
         }
     }
 #pragma omp taskwait
     if (any_error != true) {
         //write ordered to file
+        //printf("Thread %d writes compressed blocks of file %s\n", omp_get_thread_num(), filename.c_str());
+
         std::ofstream outFile(filename + ".zip", std::ios::binary);
         if (!outFile.is_open()) {
-            std::fprintf(stderr, "Cannot open output file!\n");
+            log_msg(ERROR, cpar, "Cannot open output file %s!\n", filename.c_str());
             any_error = true;
         } else {
             //Write header

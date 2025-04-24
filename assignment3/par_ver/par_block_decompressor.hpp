@@ -57,15 +57,14 @@ inline vector<DecompBlockHeaderInfo> read_header(unsigned char *ptr) {
 
 static bool block_decompress(const string &filename, const CompressionParams &cpar) {
     if (!filename.ends_with(".zip")) {
-        std::fprintf(stderr, "%s is not a zip: the file will not be decompressed\n", filename.c_str());
+        log_msg(VERBOSE, cpar, "%s is not a zip: the file will not be decompressed\n", filename.c_str());
         return false;
     }
     size_t filesize = 0;
     unsigned char *ptr = nullptr;
     if (!mapFile(filename.c_str(), filesize, ptr, cpar)) {
-        if (cpar.quite_mode >= 1)
-            std::fprintf(stderr, "mapFile %s failed\n", filename.c_str());
-        exit(EXIT_FAILURE);
+        log_msg(ERROR, cpar, "mapFile %s failed\n", filename.c_str());
+        return false;
     }
     vector<DecompBlockHeaderInfo> block_header = read_header(ptr);
     vector<DecompBlockInfo> decompr_blocks;
@@ -81,8 +80,7 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
         mz_ulong orig_len = blk.orig_block_size;
         int cmp_status = uncompress(ptrOut, &orig_len, inPtr, blk.comp_block_size);
         if (cmp_status != Z_OK) {
-            if (cpar.quite_mode >= 1)
-                std::fprintf(stderr, "uncompress failed!\n");
+            log_msg(ERROR, cpar, "uncompress failed!\n", filename.c_str());
             any_error = true;
         } else {
             size_t block_index = i;
@@ -95,7 +93,7 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
         std::string outfile = filename.substr(0, filename.size() - 4); // remove the SUFFIX (i.e., .zip)
         std::ofstream outFile(outfile, std::ios::binary);
         if (!outFile.is_open()) {
-            std::fprintf(stderr, "Cannot open output file!\n");
+            log_msg(ERROR, cpar, "Cannot open output file!\n");
             any_error = true;
         } else {
             for (const auto &blk: decompr_blocks) {

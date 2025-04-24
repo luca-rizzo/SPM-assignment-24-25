@@ -15,10 +15,14 @@ enum OpToPerform {
     COMPRESS, DECOMPRESS
 };
 
+enum LogLevel {
+    SILENT, ERROR, VERBOSE
+};
+
 typedef struct CompressionParams {
     OpToPerform op_to_perform = COMPRESS; // by default, it compresses
     bool remove_origin = false; // Does it keep the origin file?
-    int quite_mode = 1; // 0 silent, 1 error messages, 2 verbose
+    LogLevel quite_mode = ERROR;
     bool scan_subdirectories = false;
     std::vector<std::string> files;
 } CompressionParams;
@@ -102,7 +106,12 @@ static inline CompressionParams parseCommandLine(int argc, char *argv[]) {
                     usage(argv[0]);
                     exit(EXIT_FAILURE);
                 }
-                params.quite_mode = (q == 1);
+                if (q == 0)
+                    params.quite_mode = SILENT;
+                else if (q == 2)
+                    params.quite_mode = VERBOSE;
+                else
+                    params.quite_mode = ERROR;
             }
             break;
             default:
