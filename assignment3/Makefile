@@ -6,6 +6,7 @@ LDFLAGS 	= -pthread -fopenmp
 OPTFLAGS	= -O3 -ffast-math -DNDEBUG
 
 TARGETS		= minizseq minizpar
+PAR_DEPENDENCIES = par_ver/par_utility.hpp par_ver/cmdline_param_parser.hpp par_ver/par_block_compressor.hpp par_ver/par_block_decompressor.hpp
 
 .PHONY: all clean clean_all clean_test_file compile_all
 .SUFFIXES: .cpp
@@ -20,7 +21,7 @@ all	: $(TARGETS)
 
 minizseq	: minizseq.cpp cmdline.hpp utility.hpp
 
-minizpar	: par_ver/minizpar.cpp cmdline.hpp utility.hpp
+minizpar	: par_ver/minizpar.cpp $(PAR_DEPENDENCIES)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) $(OPTFLAGS) -o $@ $< ./miniz/miniz.c $(LDFLAGS)
 
 clean_test_file:
