@@ -21,22 +21,25 @@ typedef struct CompBlockInfo {
 inline size_t compute_block_size(size_t filesize) {
     int num_threads = omp_get_max_threads();
 
-    size_t block_size = filesize / num_threads;
+    size_t block_size = filesize / (num_threads);
 
-    return ((block_size + 4095) / 4096) * 4096;
+    return block_size;
 }
 
 inline void write_header(const vector<CompBlockInfo> &blocks, std::ofstream &outFile) {
+    //header: num_blocks block_size last_block_size comp_size_1 offset_1...comp_size_n offset_n
     size_t num_blocks = blocks.size();
+    size_t block_size = blocks[0].orig_block_size;
+    size_t last_block_size = blocks[num_blocks - 1].orig_block_size;
     outFile.write(reinterpret_cast<const char *>(&num_blocks), sizeof(size_t));
+    outFile.write(reinterpret_cast<const char *>(&block_size), sizeof(size_t));
+    outFile.write(reinterpret_cast<const char *>(&last_block_size), sizeof(size_t));
     size_t offset = 0;
-    for (const auto &blk: blocks) {
+    for (const auto& blk: blocks) {
         size_t comp_size = blk.comp_block_size;
-        size_t orig_size = blk.orig_block_size;
         outFile.write(reinterpret_cast<const char *>(&comp_size), sizeof(size_t));
-        outFile.write(reinterpret_cast<const char *>(&orig_size), sizeof(size_t));
         outFile.write(reinterpret_cast<const char *>(&offset), sizeof(size_t));
-        offset += blk.comp_block_size;
+        offset += comp_size;
     }
 }
 
