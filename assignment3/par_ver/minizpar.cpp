@@ -101,19 +101,14 @@ static inline void unmapFile(unsigned char *ptr, size_t size, const CompressionP
 }
 
 size_t compute_block_size(size_t filesize) {
+    // Usa il numero di thread disponibili per OpenMP
     int num_threads = omp_get_max_threads();
 
+    // Calcola dimensione blocco basata sul numero di thread
     size_t block_size = filesize / num_threads;
 
-    block_size = ((block_size + 4095) / 4096) * 4096;
-
-
-    if (block_size < 16 * 1024)
-        return 16 * 1024;      // min 16KB
-    if (block_size > 16 * 1024 * 1024)
-        return 16 * 1024 * 1024; // max 16MB
-
-    return block_size;
+    // Arrotonda a multipli di 4KB per efficienza
+    return ((block_size + 4095) / 4096) * 4096;
 }
 
 // check if the string 's' is a number, otherwise it returns false
@@ -400,10 +395,10 @@ void execute_op(const string &file_name, const CompressionParams& cpar) {
     }
 }
 
-void traverse_and_apply_op(const string &dir_to_traverse, const CompressionParams &cpar) {
+void traverse_and_apply_op(const string& dir_to_traverse, const CompressionParams& cpar) {
     std::vector<fs::directory_entry> snapshot;
     for (const auto &entry: fs::directory_iterator(dir_to_traverse)) {
-        snapshot.push_back(entry); // crea una copia sicura
+        snapshot.push_back(entry);
     }
     for (const auto &entry: snapshot) {
         auto file_name = entry.path().generic_string();
@@ -424,10 +419,7 @@ void traverse_and_apply_op(const string &dir_to_traverse, const CompressionParam
 
 void do_work(const string &file_name, const CompressionParams &cpar) {
     if (fs::is_directory(file_name)) {
-#pragma omp task
-        {
-            traverse_and_apply_op(file_name, cpar);
-        }
+        traverse_and_apply_op(file_name, cpar);
     } else {
 #pragma omp task
         {
@@ -438,6 +430,7 @@ void do_work(const string &file_name, const CompressionParams &cpar) {
 
 
 int main(int argc, char *argv[]) {
+    omp_set_nested(1);
     CompressionParams cpar = parseCommandLine(argc, argv);
     //debug_params(cpar);
     TIMERSTART(minizpar)
@@ -451,6 +444,7 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
+        #pragma omp taskwait
     }
     TIMERSTOP(minizpar)
 }
