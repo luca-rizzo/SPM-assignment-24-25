@@ -55,30 +55,30 @@ void usage(const char *argv0) {
 // map the file pointed by filepath in memory
 // if size is zero, it looks for file size
 // if everything is ok, it returns the memory pointer ptr
-static inline bool mapFile(const char fname[], size_t &size, unsigned char *&ptr, const CompressionParams& cpar) {
+static inline bool mapFile(const char fname[], size_t &size, unsigned char *&ptr, const CompressionParams &cpar) {
     // open input file.
     int fd = open(fname,O_RDONLY);
-    if (fd<0) {
+    if (fd < 0) {
         if (cpar.quite_mode >= 1) {
             perror("mapFile open");
             std::fprintf(stderr, "Failed opening file %s\n", fname);
         }
         return false;
     }
-    if (size==0) {
+    if (size == 0) {
         struct stat s;
-        if (fstat (fd, &s)) {
+        if (fstat(fd, &s)) {
             if (cpar.quite_mode >= 1) {
                 perror("fstat");
                 std::fprintf(stderr, "Failed to stat file %s\n", fname);
             }
             return false;
         }
-        size=s.st_size;
+        size = s.st_size;
     }
 
     // map all the file in memory
-    ptr = (unsigned char *) mmap (0, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    ptr = (unsigned char *) mmap(0, size, PROT_READ, MAP_PRIVATE, fd, 0);
     if (ptr == MAP_FAILED) {
         if (cpar.quite_mode >= 1) {
             perror("mmap");
@@ -91,8 +91,8 @@ static inline bool mapFile(const char fname[], size_t &size, unsigned char *&ptr
 }
 
 // unmap a previously memory-mapped file
-static inline void unmapFile(unsigned char *ptr, size_t size, const CompressionParams& cpar) {
-    if (munmap(ptr, size)<0) {
+static inline void unmapFile(unsigned char *ptr, size_t size, const CompressionParams &cpar) {
+    if (munmap(ptr, size) < 0) {
         if (cpar.quite_mode >= 1) {
             perror("nummap");
             std::fprintf(stderr, "Failed to unmap file\n");
@@ -101,25 +101,22 @@ static inline void unmapFile(unsigned char *ptr, size_t size, const CompressionP
 }
 
 size_t compute_block_size(size_t filesize) {
-    // Usa il numero di thread disponibili per OpenMP
     int num_threads = omp_get_max_threads();
 
-    // Calcola dimensione blocco basata sul numero di thread
     size_t block_size = filesize / num_threads;
 
-    // Arrotonda a multipli di 4KB per efficienza
     return ((block_size + 4095) / 4096) * 4096;
 }
 
 // check if the string 's' is a number, otherwise it returns false
-static bool isNumber(const char* s, long &n) {
+static bool isNumber(const char *s, long &n) {
     try {
         size_t e;
-        n=std::stol(s, &e, 10);
+        n = std::stol(s, &e, 10);
         return e == strlen(s);
-    } catch (const std::invalid_argument&) {
+    } catch (const std::invalid_argument &) {
         return false;
-    } catch (const std::out_of_range&) {
+    } catch (const std::out_of_range &) {
         return false;
     }
 }
@@ -244,7 +241,7 @@ void write_header(const vector<CompBlockInfo> &blocks, std::ofstream &outFile) {
     }
 }
 
-bool block_compress(const string &filename, const CompressionParams& cpar) {
+bool block_compress(const string &filename, const CompressionParams &cpar) {
     size_t filesize = 0;
     unsigned char *ptr = nullptr;
     if (!mapFile(filename.c_str(), filesize, ptr, cpar)) {
@@ -256,52 +253,49 @@ bool block_compress(const string &filename, const CompressionParams& cpar) {
     size_t block_size = compute_block_size(filesize);
     size_t num_blocks = (filesize + block_size - 1) / block_size;
     blocks.resize(num_blocks);
-    bool any_error = false;
-#pragma omp parallel
-    {
-#pragma omp for schedule(dynamic) reduction(||:any_error)
-        for (size_t i = 0; i < filesize; i += block_size) {
-            //each thread compress a block and store the various reference to
-            size_t eff_block_size = min(block_size, filesize - i);
-            unsigned char *inPtr = ptr + i;
-            // get an estimation of the maximum compression size
-            mz_ulong cmp_len = compressBound(eff_block_size);
-            // allocate memory to store compressed data in memory
-            auto *ptrOut = new unsigned char[cmp_len];
-            if (compress(ptrOut, &cmp_len, inPtr, eff_block_size) != Z_OK) {
-                if (cpar.quite_mode >= 1)
-                    std::fprintf(stderr, "Error compressing block %lu of file %s\n", i, filename.c_str());
-                delete [] ptrOut;
-                any_error = true;
-            } else {
-                size_t block_index = i / block_size;
-                blocks[block_index] = CompBlockInfo{cmp_len, eff_block_size, ptrOut};
-            }
-        }
-#pragma omp single
-        {
-            if (any_error != true) {
-                //write ordered to file
-                std::ofstream outFile(filename + ".zip", std::ios::binary);
-                if (!outFile.is_open()) {
-                    std::fprintf(stderr, "Cannot open output file!\n");
-                    any_error = true;
-                } else {
-                    //Write header
-                    write_header(blocks, outFile);
-                    //Write blocks content
-                    for (const auto &blk: blocks) {
-                        outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.comp_block_size);
-                    }
-                    outFile.close();
-                }
-            }
-            for (const auto &blk: blocks) {
-                delete[] blk.ptr;
-            }
-            unmapFile(ptr, filesize, cpar);
+    std::atomic_bool any_error(false);
+#pragma omp taskloop grainsize(1) nogroup shared(blocks, ptr, any_error)
+    for (size_t i = 0; i < filesize; i += block_size) {
+        //each thread compress a block and store the various reference to
+        size_t eff_block_size = min(block_size, filesize - i);
+        unsigned char *inPtr = ptr + i;
+        // get an estimation of the maximum compression size
+        mz_ulong cmp_len = compressBound(eff_block_size);
+        // allocate memory to store compressed data in memory
+        auto *ptrOut = new unsigned char[cmp_len];
+        if (compress(ptrOut, &cmp_len, inPtr, eff_block_size) != Z_OK) {
+            if (cpar.quite_mode >= 1)
+                std::fprintf(stderr, "Error compressing block %lu of file %s\n", i, filename.c_str());
+            delete [] ptrOut;
+            any_error = true;
+        } else {
+            size_t block_index = i / block_size;
+            blocks[block_index] = CompBlockInfo{cmp_len, eff_block_size, ptrOut};
         }
     }
+#pragma omp taskwait
+    if (any_error != true) {
+        //write ordered to file
+        std::ofstream outFile(filename + ".zip", std::ios::binary);
+        if (!outFile.is_open()) {
+            std::fprintf(stderr, "Cannot open output file!\n");
+            any_error = true;
+        } else {
+            //Write header
+            write_header(blocks, outFile);
+            //Write blocks content
+            for (const auto &blk: blocks) {
+                outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.comp_block_size);
+            }
+            outFile.close();
+        }
+    }
+    for (const auto &blk: blocks) {
+        delete[] blk.ptr;
+    }
+    unmapFile(ptr, filesize, cpar);
+
+
     return !any_error;
 }
 
@@ -327,7 +321,7 @@ vector<DecompBlockHeaderInfo> read_header(unsigned char *ptr) {
     return blocks;
 }
 
-bool block_decompress(const string &filename, const CompressionParams& cpar) {
+bool block_decompress(const string &filename, const CompressionParams &cpar) {
     if (!filename.ends_with(".zip")) {
         std::fprintf(stderr, "%s is not a zip: the file will not be decompressed\n", filename.c_str());
         return false;
@@ -344,58 +338,54 @@ bool block_decompress(const string &filename, const CompressionParams& cpar) {
     decompr_blocks.resize(block_header.size());
     size_t header_size = sizeof(uint32_t) + block_header.size() * (sizeof(uint32_t) * 3);
     unsigned char *data_ptr = ptr + header_size;
-    bool any_error = false;
-#pragma omp parallel
-    {
-#pragma omp for schedule(dynamic) reduction(||:any_error)
-        for (size_t i = 0; i < block_header.size(); i += 1) {
-            DecompBlockHeaderInfo blk = block_header[i];
-            auto *ptrOut = new unsigned char[blk.orig_block_size];
-            unsigned char *inPtr = data_ptr + blk.offset;
-            mz_ulong orig_len = blk.orig_block_size;
-            int cmp_status = uncompress(ptrOut, &orig_len, inPtr, blk.comp_block_size);
-            if (cmp_status != Z_OK) {
-                if (cpar.quite_mode >= 1)
-                    std::fprintf(stderr, "uncompress failed!\n");
-                any_error = true;
-            } else {
-                size_t block_index = i;
-                decompr_blocks[block_index] = DecompBlockInfo{orig_len, ptrOut};
-            }
-        }
-#pragma omp single
-        {
-            if (any_error != true) {
-                //write ordered to file
-                std::string outfile = filename.substr(0, filename.size() - 4); // remove the SUFFIX (i.e., .zip)
-                std::ofstream outFile(outfile, std::ios::binary);
-                if (!outFile.is_open()) {
-                    std::fprintf(stderr, "Cannot open output file!\n");
-                    any_error = true;
-                } else {
-                    for (const auto &blk: decompr_blocks) {
-                        outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.block_size);
-                    }
-                    outFile.close();
-                }
-            }
-            for (const auto &blk: decompr_blocks) {
-                delete[] blk.ptr;
-            }
-            unmapFile(ptr, filesize, cpar);
+    std::atomic_bool any_error(false);
+#pragma omp taskloop grainsize(1) nogroup shared(decompr_blocks, block_header, data_ptr, any_error)
+    for (size_t i = 0; i < block_header.size(); i += 1) {
+        DecompBlockHeaderInfo blk = block_header[i];
+        auto *ptrOut = new unsigned char[blk.orig_block_size];
+        unsigned char *inPtr = data_ptr + blk.offset;
+        mz_ulong orig_len = blk.orig_block_size;
+        int cmp_status = uncompress(ptrOut, &orig_len, inPtr, blk.comp_block_size);
+        if (cmp_status != Z_OK) {
+            if (cpar.quite_mode >= 1)
+                std::fprintf(stderr, "uncompress failed!\n");
+            any_error = true;
+        } else {
+            size_t block_index = i;
+            decompr_blocks[block_index] = DecompBlockInfo{orig_len, ptrOut};
         }
     }
+#pragma omp taskwait
+    if (any_error != true) {
+        //write ordered to file
+        std::string outfile = filename.substr(0, filename.size() - 4); // remove the SUFFIX (i.e., .zip)
+        std::ofstream outFile(outfile, std::ios::binary);
+        if (!outFile.is_open()) {
+            std::fprintf(stderr, "Cannot open output file!\n");
+            any_error = true;
+        } else {
+            for (const auto &blk: decompr_blocks) {
+                outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.block_size);
+            }
+            outFile.close();
+        }
+    }
+    for (const auto &blk: decompr_blocks) {
+        delete[] blk.ptr;
+    }
+    unmapFile(ptr, filesize, cpar);
+
     return !any_error;
 }
 
-void execute_op(const string &file_name, const CompressionParams& cpar) {
+void execute_op(const string &file_name, const CompressionParams &cpar) {
     bool success = cpar.op_to_perform == COMPRESS ? block_compress(file_name, cpar) : block_decompress(file_name, cpar);
     if (success && cpar.remove_origin) {
         unlink(file_name.c_str());
     }
 }
 
-void traverse_and_apply_op(const string& dir_to_traverse, const CompressionParams& cpar) {
+void traverse_and_apply_op(const string &dir_to_traverse, const CompressionParams &cpar) {
     std::vector<fs::directory_entry> snapshot;
     for (const auto &entry: fs::directory_iterator(dir_to_traverse)) {
         snapshot.push_back(entry);
@@ -430,7 +420,6 @@ void do_work(const string &file_name, const CompressionParams &cpar) {
 
 
 int main(int argc, char *argv[]) {
-    omp_set_nested(1);
     CompressionParams cpar = parseCommandLine(argc, argv);
     //debug_params(cpar);
     TIMERSTART(minizpar)
@@ -444,7 +433,7 @@ int main(int argc, char *argv[]) {
                 }
             }
         }
-        #pragma omp taskwait
+#pragma omp taskwait
     }
     TIMERSTOP(minizpar)
 }
