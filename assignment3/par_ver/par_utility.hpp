@@ -7,7 +7,7 @@
 #include <sys/stat.h>
 #include "cmdline_param_parser.hpp"
 
-
+constexpr string COMP_FILE_SUFFIX = ".zip";
 
 inline void log_msg(LogLevel level, const CompressionParams& cpar, const char* fmt, ...) {
     if (cpar.quite_mode >= level) {

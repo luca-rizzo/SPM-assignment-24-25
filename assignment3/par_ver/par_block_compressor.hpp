@@ -20,11 +20,18 @@ typedef struct CompBlockInfo {
 } CompBlockInfo;
 
 inline size_t compute_block_size(size_t filesize) {
+    constexpr size_t MIN_BLOCK_SIZE = 1 << 19;
+    constexpr size_t MAX_BLOCK_SIZE = 64 << 20;
     int num_threads = omp_get_max_threads();
 
-    size_t block_size = filesize / (num_threads);
+    size_t block_size = filesize / num_threads;
 
-    return ((block_size + 4095) / 4096) * 4096;
+    if (block_size < MIN_BLOCK_SIZE)
+        block_size = MIN_BLOCK_SIZE;
+    else if (block_size > MAX_BLOCK_SIZE)
+        block_size = MAX_BLOCK_SIZE;
+
+    return block_size;
 }
 
 inline void write_header(const vector<CompBlockInfo> &blocks, std::ofstream &outFile) {
@@ -79,7 +86,7 @@ static inline bool block_compress(const string &filename, const CompressionParam
         //write ordered to file
         //printf("Thread %d writes compressed blocks of file %s\n", omp_get_thread_num(), filename.c_str());
 
-        std::ofstream outFile(filename + ".zip", std::ios::binary);
+        std::ofstream outFile(filename + COMP_FILE_SUFFIX, std::ios::binary);
         if (!outFile.is_open()) {
             log_msg(ERROR, cpar, "Cannot open output file %s!\n", filename.c_str());
             any_error = true;

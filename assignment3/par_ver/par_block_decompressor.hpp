@@ -56,7 +56,7 @@ inline vector<DecompBlockHeaderInfo> read_header(unsigned char *ptr) {
 }
 
 static bool block_decompress(const string &filename, const CompressionParams &cpar) {
-    if (!filename.ends_with(".zip")) {
+    if (!filename.ends_with(COMP_FILE_SUFFIX)) {
         log_msg(VERBOSE, cpar, "%s is not a zip: the file will not be decompressed\n", filename.c_str());
         return false;
     }
