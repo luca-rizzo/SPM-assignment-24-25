@@ -3,5 +3,4 @@ CMakeLists.txt
 .idea
 *.ipynb
 *.venv
-*test*
 *zip*

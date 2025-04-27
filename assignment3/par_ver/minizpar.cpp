@@ -15,75 +15,63 @@
 namespace fs = std::filesystem;
 using namespace std;
 
-void execute_op(const string &filename, const CompressionParams &cpar, atomic_bool &global_success) {
+bool execute_op(const string &filename, const CompressionParams &cpar) {
     if (cpar.op_to_perform == DECOMPRESS && !filename.ends_with(".zip")) {
         log_msg(VERBOSE, cpar, "%s is not a zip: the file will not be decompressed\n", filename.c_str());
-        return;
+        return true;
     }
     bool local_success = cpar.op_to_perform == COMPRESS
                              ? block_compress(filename, cpar)
                              : block_decompress(filename, cpar);
-    if (!local_success) {
-        global_success.store(false);
-        return;
-    }
-    if (cpar.remove_origin) {
+    if (local_success && cpar.remove_origin) {
         unlink(filename.c_str());
     }
+    return local_success;
 }
 
-void traverse_and_apply_op(const string &dir_to_traverse, const CompressionParams &cpar, atomic_bool &global_success) {
-    std::vector<fs::directory_entry> snapshot;
+vector<string> recurse_and_collect(const string &dir_to_traverse, bool scan_subdirectories) {
+    vector<string> sub_files;
     for (const auto &entry: fs::directory_iterator(dir_to_traverse)) {
-        snapshot.push_back(entry);
-    }
-    for (const auto &entry: snapshot) {
-        auto file_name = entry.path().generic_string();
-        if (entry.is_directory() && cpar.scan_subdirectories) {
-#pragma omp task shared(global_success)
-            {
-                traverse_and_apply_op(file_name, cpar, global_success);
-            }
-        } else if (entry.is_regular_file()) {
-#pragma omp task shared(global_success)
-            {
-                execute_op(file_name, cpar, global_success);
-            }
+        if (entry.is_regular_file()) {
+            sub_files.push_back(entry.path().generic_string());
+        } else if (entry.is_directory() && scan_subdirectories) {
+            vector<string> deeper_files = recurse_and_collect(entry.path().generic_string(), scan_subdirectories);
+            sub_files.insert(sub_files.end(), deeper_files.begin(), deeper_files.end());
         }
     }
+    return sub_files;
 }
 
-void do_work(const string &file_name, const CompressionParams &cpar, atomic_bool &global_success) {
-    if (fs::is_directory(file_name)) {
-        traverse_and_apply_op(file_name, cpar, global_success);
-    } else {
-#pragma omp task shared(global_success)
-        {
-            execute_op(file_name, cpar, global_success);
+vector<string> collect_all_files(const CompressionParams &cpar) {
+    vector<string> accumulator;
+    for (const std::string &file: cpar.files) {
+        if (fs::is_regular_file(file)) {
+            accumulator.push_back(file);
+        } else if (fs::is_directory(file)) {
+            vector<string> deeper_files = recurse_and_collect(file, cpar.scan_subdirectories);
+            accumulator.insert(accumulator.end(), deeper_files.begin(), deeper_files.end());
         }
     }
+    return accumulator;
 }
 
 int main(int argc, char *argv[]) {
     CompressionParams cpar = parseCommandLine(argc, argv);
-    atomic_bool global_success(true);
     TIMERSTART(minizpar)
+    vector<string> all_files = collect_all_files(cpar);
+    bool global_success = true;
 #pragma omp parallel
     {
 #pragma omp single
         {
-#pragma omp taskgroup
-            {
-                for (const std::string &file: cpar.files) {
-                    {
-                        do_work(file, cpar, global_success);
-                    }
-                }
+#pragma omp taskloop grainsize(1) shared(all_files) reduction(&:global_success)
+            for (const std::string &file_name: all_files) {
+                global_success = execute_op(file_name, cpar);
             }
         }
     }
     TIMERSTOP(minizpar)
-    if (!global_success.load()) {
+    if (!global_success) {
         printf("Exiting with Failure\n");
         return -1;
     }

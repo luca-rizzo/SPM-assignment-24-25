@@ -56,6 +56,35 @@ static inline bool mapFile(const char fname[], size_t &size, unsigned char *&ptr
     return true;
 }
 
+// create an empty file of size 'size' and maps it in memory returning
+// the pointer into 'ptr'
+static inline bool allocateFile(const char fname[], const size_t size, unsigned char *&ptr, const CompressionParams &cpar) {
+
+    int fd = open(fname, O_RDWR | O_CREAT | O_TRUNC, 0666);
+    if (fd < 0) {
+        if (cpar.quite_mode >= 1)
+            std::fprintf(stderr, "Failed to open output file: %s\n", fname);
+        return false;
+    }
+    // Resize the file
+    if (ftruncate(fd, size) < 0) {
+        if (cpar.quite_mode >= 1)
+            std::fprintf(stderr, "Error setting file size with ftruncate %s\n", strerror(errno));
+        close(fd);
+        return false;
+    }
+
+    ptr = (unsigned char*)mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (ptr == MAP_FAILED) {
+        if (cpar.quite_mode >= 1)
+            std::fprintf(stderr, "Error mapping file %s\n", strerror(errno));
+        close(fd);
+        return false;
+    }
+    close(fd);
+    return true;
+}
+
 // unmap a previously memory-mapped file
 static inline void unmapFile(unsigned char *ptr, size_t size, const CompressionParams &cpar) {
     if (munmap(ptr, size) < 0) {

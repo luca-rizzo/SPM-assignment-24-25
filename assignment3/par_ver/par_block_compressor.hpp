@@ -1,13 +1,10 @@
 #ifndef PAR_BLOCK_COMPRESSOR_H
 #define PAR_BLOCK_COMPRESSOR_H
+
 #include <vector>
-#include <atomic>
 #include <cstdarg>
-#include <fcntl.h>
 #include <string>
 #include <omp.h>
-#include <filesystem>
-#include <fstream>
 #include "miniz.h"
 #include "par_utility.hpp"
 
@@ -20,8 +17,8 @@ typedef struct CompBlockInfo {
 } CompBlockInfo;
 
 inline size_t compute_block_size(size_t filesize) {
-    constexpr size_t MIN_BLOCK_SIZE = 1 << 19;
-    constexpr size_t MAX_BLOCK_SIZE = 64 << 20;
+    constexpr size_t MIN_BLOCK_SIZE = 1ULL << 19; //512kb
+    constexpr size_t MAX_BLOCK_SIZE = 1ULL << 26; //64mb
     int num_threads = omp_get_max_threads();
 
     size_t block_size = filesize / num_threads;
@@ -34,7 +31,13 @@ inline size_t compute_block_size(size_t filesize) {
     return block_size;
 }
 
-inline void write_header(const vector<CompBlockInfo> &blocks, std::ofstream &outFile) {
+inline void write_header(unsigned char *compressed_ptr,
+                         const vector<size_t> &header) {
+    size_t header_size = header.size() * sizeof(size_t);
+    memcpy(compressed_ptr, header.data(), header_size);
+}
+
+inline void seq_write_header(const vector<CompBlockInfo> &blocks, std::ofstream &outFile) {
     //header: num_blocks block_size last_block_size comp_size_1 offset_1...comp_size_n offset_n
     size_t num_blocks = blocks.size();
     size_t block_size = blocks[0].orig_block_size;
@@ -51,63 +54,126 @@ inline void write_header(const vector<CompBlockInfo> &blocks, std::ofstream &out
     }
 }
 
-static inline bool block_compress(const string &filename, const CompressionParams &cpar) {
+inline void cleanup_resources(const CompressionParams &cpar, size_t filesize,
+                              unsigned char *ptr, vector<CompBlockInfo> blocks) {
+    for (auto &blk: blocks) {
+        delete[] blk.ptr;
+        blk.ptr = nullptr;
+    }
+
+    unmapFile(ptr, filesize, cpar);
+}
+
+inline size_t calculate_compressed_dim(const vector<CompBlockInfo> &blocks,
+                                       vector<size_t> &header,
+                                       vector<size_t> &write_offsets) {
+    size_t num_blocks = blocks.size();
+    size_t block_size = blocks[0].orig_block_size;
+    size_t last_block_size = blocks[num_blocks - 1].orig_block_size;
+    header.reserve(3 + blocks.size() * 2);
+    header.push_back(num_blocks);
+    header.push_back(block_size);
+    header.push_back(last_block_size);
+    size_t offset = 0;
+    size_t in_file_offset = sizeof(size_t) * (3 + blocks.size() * 2);
+    for (size_t i = 0; i < blocks.size(); ++i) {
+        const auto &blk = blocks[i];
+        header.push_back(blk.comp_block_size);
+        header.push_back(offset);
+        write_offsets[i] = in_file_offset;
+        offset += blk.comp_block_size;
+        in_file_offset += blk.comp_block_size;
+    }
+
+    size_t header_size = header.size() * sizeof(size_t);
+
+    return header_size + offset;
+}
+
+inline bool par_write_comp_file(const string &compressed_filename, const CompressionParams &cpar,
+                                const vector<CompBlockInfo> &blocks) {
+    vector<size_t> write_offsets(blocks.size());
+    vector<size_t> header;
+    size_t compressed_file_size = calculate_compressed_dim(blocks, header, write_offsets);
+    unsigned char *compressed_mm_file = nullptr;
+    // allocate the space in a file for the uncompressed data. The file is memory mapped.
+    if (!allocateFile(compressed_filename.c_str(), compressed_file_size, compressed_mm_file, cpar)) {
+        log_msg(ERROR, cpar, "I/O error writing file %s: %s\n", compressed_filename.c_str(), " cannot map file");
+        return false;
+    }
+    write_header(compressed_mm_file, header);
+#pragma omp taskloop grainsize(1) shared(blocks, write_offsets, compressed_mm_file) if (blocks.size() > 1)
+    for (size_t i = 0; i < blocks.size(); ++i) {
+        unsigned char *start_block = compressed_mm_file + write_offsets[i];
+        memcpy(start_block, blocks[i].ptr, blocks[i].comp_block_size);
+    }
+    unmapFile(compressed_mm_file, compressed_file_size, cpar);
+    return true;
+}
+
+inline bool seq_write_comp_file(const string &compressed_filename, const CompressionParams &cpar,
+                                const vector<CompBlockInfo> &blocks) {
+    try {
+        // printf("Thread %d writes compressed blocks of file %s\n", omp_get_thread_num(), filename.c_str());
+        std::ofstream outFile;
+        outFile.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+        outFile.open(compressed_filename, std::ios::binary);
+        // Write header
+        seq_write_header(blocks, outFile);
+        // Write blocks content
+        for (const auto &blk: blocks) {
+            outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.comp_block_size);
+        }
+        outFile.close();
+    } catch (const std::ios_base::failure &e) {
+        log_msg(ERROR, cpar, "I/O error writing file %s: %s\n", compressed_filename.c_str(), e.what());
+        filesystem::remove(compressed_filename);
+        return false;
+    }
+    return true;
+}
+
+static bool block_compress(const string &filename, const CompressionParams &cpar) {
     size_t filesize = 0;
-    unsigned char *ptr = nullptr;
-    if (!mapFile(filename.c_str(), filesize, ptr, cpar)) {
+    //pointer that will point to the original file mapped in memory
+    unsigned char *original_mm_file = nullptr;
+    if (!mapFile(filename.c_str(), filesize, original_mm_file, cpar)) {
         log_msg(ERROR, cpar, "mapFile %s failed\n", filename.c_str());
         return false;
     }
+
     vector<CompBlockInfo> blocks;
     size_t block_size = compute_block_size(filesize);
     size_t num_blocks = (filesize + block_size - 1) / block_size;
     blocks.resize(num_blocks);
     bool any_error = false;
-#pragma omp taskloop grainsize(1) shared(blocks, ptr) reduction(|:any_error)
+
+#pragma omp taskloop grainsize(1) shared(blocks, original_mm_file) reduction(|:any_error) if (num_blocks > 1)
     for (size_t i = 0; i < filesize; i += block_size) {
-        //each thread compress a block and store the various reference to
         size_t eff_block_size = min(block_size, filesize - i);
-        unsigned char *inPtr = ptr + i;
-        // get an estimation of the maximum compression size
+        unsigned char *prt_in = original_mm_file + i;
         mz_ulong cmp_len = compressBound(eff_block_size);
-        // allocate memory to store compressed data in memory
-        auto *ptrOut = new unsigned char[cmp_len];
-        if (compress(ptrOut, &cmp_len, inPtr, eff_block_size) != Z_OK) {
+
+        auto *ptr_out = new unsigned char[cmp_len];
+        if (compress(ptr_out, &cmp_len, prt_in, eff_block_size) != Z_OK) {
             log_msg(ERROR, cpar, "Error compressing block %lu of file %s\n", i, filename.c_str());
-            delete [] ptrOut;
+            delete[] ptr_out;
             any_error = true;
         } else {
             size_t block_index = i / block_size;
-            //printf("Thread %d compress block %lu of file %s\n", omp_get_thread_num(), block_index, filename.c_str());
-            blocks[block_index] = CompBlockInfo{cmp_len, eff_block_size, ptrOut};
+            blocks[block_index] = CompBlockInfo{cmp_len, eff_block_size, ptr_out};
         }
     }
-    if (!any_error) {
-        auto compressed_filename = filename + COMP_FILE_SUFFIX;
-        try {
-            // printf("Thread %d writes compressed blocks of file %s\n", omp_get_thread_num(), filename.c_str());
-            std::ofstream outFile;
-            outFile.exceptions(std::ofstream::failbit | std::ofstream::badbit);
-            outFile.open(filename + COMP_FILE_SUFFIX, std::ios::binary);
-            // Write header
-            write_header(blocks, outFile);
-            // Write blocks content
-            for (const auto &blk: blocks) {
-                outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.comp_block_size);
-            }
-            outFile.close();
-        } catch (const std::ios_base::failure &e) {
-            log_msg(ERROR, cpar, "I/O error writing file %s: %s\n", filename.c_str(), e.what());
-            filesystem::remove(compressed_filename);
-            any_error = true;
-        }
+    if (any_error) {
+        cleanup_resources(cpar, filesize, original_mm_file, blocks);
+        return false;
     }
-    for (const auto &blk: blocks) {
-        delete[] blk.ptr;
-    }
-    unmapFile(ptr, filesize, cpar);
-
-    return !any_error;
+    string compressed_filename = filename + COMP_FILE_SUFFIX;
+    bool compression_res = cpar.parallel_write
+                               ? par_write_comp_file(compressed_filename, cpar, blocks)
+                               : seq_write_comp_file(compressed_filename, cpar, blocks);
+    cleanup_resources(cpar, filesize, original_mm_file, blocks);
+    return compression_res;
 }
 
-#endif //PAR_BLOCK_COMPRESSOR_H
+#endif // PAR_BLOCK_COMPRESSOR_H

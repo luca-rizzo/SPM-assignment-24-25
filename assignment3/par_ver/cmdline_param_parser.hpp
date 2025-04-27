@@ -4,7 +4,6 @@
 #include <vector>
 #include <atomic>
 #include <fcntl.h>
-#include <getopt.h>
 #include <filesystem>
 #include "miniz.h"
 
@@ -24,10 +23,11 @@ typedef struct CompressionParams {
     bool remove_origin = false; // Does it keep the origin file?
     LogLevel quite_mode = ERROR;
     bool scan_subdirectories = false;
+    bool parallel_write = true;
     std::vector<std::string> files;
 } CompressionParams;
 
-static inline void usage(const char *argv0) {
+inline void usage(const char *argv0) {
     CompressionParams params;
     std::printf("--------------------\n");
     std::printf("Usage: %s [options] file-or-directory [file-or-directory]\n", argv0);
@@ -44,7 +44,7 @@ static inline void usage(const char *argv0) {
 }
 
 // check if the string 's' is a number, otherwise it returns false
-static bool isNumber(const char *s, long &n) {
+inline bool isNumber(const char *s, long &n) {
     try {
         size_t e;
         n = std::stol(s, &e, 10);
@@ -56,10 +56,9 @@ static bool isNumber(const char *s, long &n) {
     }
 }
 
-static inline CompressionParams parseCommandLine(int argc, char *argv[]) {
+static CompressionParams parseCommandLine(int argc, char *argv[]) {
     CompressionParams params;
-    extern char *optarg;
-    const std::string optstr = "r:C:D:q:";
+    const std::string optstr = "r:C:D:q:s";
     long opt;
     bool cpresent = false, dpresent = false;
 
@@ -74,6 +73,9 @@ static inline CompressionParams parseCommandLine(int argc, char *argv[]) {
                 }
                 params.scan_subdirectories = (n == 1);
             }
+            break;
+            case 's':
+                params.parallel_write = false;
             break;
             case 'C': {
                 long c = 0;

@@ -55,6 +55,14 @@ inline vector<DecompBlockHeaderInfo> read_header(unsigned char *ptr) {
     return blocks;
 }
 
+static void cleanup_resources(const CompressionParams &cpar, size_t filesize, unsigned char *ptr,
+                              const vector<DecompBlockInfo> &decompr_blocks) {
+    for (const auto &blk: decompr_blocks) {
+        delete[] blk.ptr;
+    }
+    unmapFile(ptr, filesize, cpar);
+}
+
 static bool block_decompress(const string &filename, const CompressionParams &cpar) {
     if (!filename.ends_with(COMP_FILE_SUFFIX)) {
         log_msg(VERBOSE, cpar, "%s is not a zip: the file will not be decompressed\n", filename.c_str());
@@ -72,7 +80,7 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
     size_t header_size = sizeof(size_t) * 3 + block_header.size() * (sizeof(size_t) * 2);
     unsigned char *data_ptr = ptr + header_size;
     bool any_error = false;
-#pragma omp taskloop grainsize(1) shared(decompr_blocks, block_header, data_ptr) reduction(|:any_error)
+#pragma omp taskloop grainsize(1) shared(decompr_blocks, block_header, data_ptr) reduction(|:any_error) if (block_header.size() > 1)
     for (size_t i = 0; i < block_header.size(); i++) {
         DecompBlockHeaderInfo blk = block_header[i];
         auto *ptrOut = new unsigned char[blk.orig_block_size];
@@ -87,28 +95,25 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
             decompr_blocks[block_index] = DecompBlockInfo{orig_len, ptrOut};
         }
     }
-    if (!any_error) {
-        std::string outfile = filename.substr(0, filename.size() - COMP_FILE_SUFFIX.size()); // remove the SUFFIX (i.e., .zip)
-        try {
-            std::ofstream outFile;
-            outFile.exceptions(std::ofstream::failbit | std::ofstream::badbit);
-            outFile.open(outfile, std::ios::binary);
-
-            for (const auto &blk : decompr_blocks) {
-                outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.block_size);
-            }
-            outFile.close();
-        } catch (const std::ios_base::failure &e) {
-            log_msg(ERROR, cpar, "I/O error writing decompressed file %s: %s\n", outfile.c_str(), e.what());
-            std::filesystem::remove(outfile);
-            any_error = true;
+    if (any_error) {
+        cleanup_resources(cpar, filesize, ptr, decompr_blocks);
+        return false;
+    }
+    std::string outfile = filename.substr(0, filename.size() - COMP_FILE_SUFFIX.size());
+    try {
+        std::ofstream outFile;
+        outFile.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+        outFile.open(outfile, std::ios::binary);
+        for (const auto &blk: decompr_blocks) {
+            outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.block_size);
         }
+        outFile.close();
+    } catch (const std::ios_base::failure &e) {
+        log_msg(ERROR, cpar, "I/O error writing decompressed file %s: %s\n", outfile.c_str(), e.what());
+        std::filesystem::remove(outfile);
+        any_error = true;
     }
-
-    for (const auto &blk: decompr_blocks) {
-        delete[] blk.ptr;
-    }
-    unmapFile(ptr, filesize, cpar);
+    cleanup_resources(cpar, filesize, ptr, decompr_blocks);
 
     return !any_error;
 }
