@@ -85,7 +85,6 @@ static inline bool block_compress(const string &filename, const CompressionParam
     if (any_error != true) {
         //write ordered to file
         //printf("Thread %d writes compressed blocks of file %s\n", omp_get_thread_num(), filename.c_str());
-
         std::ofstream outFile(filename + COMP_FILE_SUFFIX, std::ios::binary);
         if (!outFile.is_open()) {
             log_msg(ERROR, cpar, "Cannot open output file %s!\n", filename.c_str());

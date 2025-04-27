@@ -72,13 +72,15 @@ int main(int argc, char *argv[]) {
     {
 #pragma omp single
         {
-            for (const std::string &file: cpar.files) {
-                {
-                    do_work(file, cpar, global_success);
+#pragma omp taskgroup
+            {
+                for (const std::string &file: cpar.files) {
+                    {
+                        do_work(file, cpar, global_success);
+                    }
                 }
             }
         }
-#pragma omp taskwait
     }
     TIMERSTOP(minizpar)
     if (!global_success.load()) {
