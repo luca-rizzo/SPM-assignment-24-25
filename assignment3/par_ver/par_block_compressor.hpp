@@ -55,8 +55,8 @@ static inline bool block_compress(const string &filename, const CompressionParam
     size_t block_size = compute_block_size(filesize);
     size_t num_blocks = (filesize + block_size - 1) / block_size;
     blocks.resize(num_blocks);
-    std::atomic_bool any_error(false);
-#pragma omp taskloop grainsize(1) nogroup shared(blocks, ptr, any_error)
+    bool any_error = false;
+#pragma omp taskloop grainsize(1) shared(blocks, ptr) reduction(|:any_error)
     for (size_t i = 0; i < filesize; i += block_size) {
         //each thread compress a block and store the various reference to
         size_t eff_block_size = min(block_size, filesize - i);
@@ -75,7 +75,6 @@ static inline bool block_compress(const string &filename, const CompressionParam
             blocks[block_index] = CompBlockInfo{cmp_len, eff_block_size, ptrOut};
         }
     }
-#pragma omp taskwait
     if (any_error != true) {
         //write ordered to file
         //printf("Thread %d writes compressed blocks of file %s\n", omp_get_thread_num(), filename.c_str());

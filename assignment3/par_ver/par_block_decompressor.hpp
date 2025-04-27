@@ -71,9 +71,9 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
     decompr_blocks.resize(block_header.size());
     size_t header_size = sizeof(size_t) * 3 + block_header.size() * (sizeof(size_t) * 2);
     unsigned char *data_ptr = ptr + header_size;
-    std::atomic_bool any_error(false);
-#pragma omp taskloop grainsize(1) nogroup shared(decompr_blocks, block_header, data_ptr, any_error)
-    for (size_t i = 0; i < block_header.size(); i += 1) {
+    bool any_error = false;
+#pragma omp taskloop grainsize(1) shared(decompr_blocks, block_header, data_ptr) reduction(|:any_error)
+    for (size_t i = 0; i < block_header.size(); i++) {
         DecompBlockHeaderInfo blk = block_header[i];
         auto *ptrOut = new unsigned char[blk.orig_block_size];
         unsigned char *inPtr = data_ptr + blk.offset;
@@ -87,7 +87,6 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
             decompr_blocks[block_index] = DecompBlockInfo{orig_len, ptrOut};
         }
     }
-#pragma omp taskwait
     if (any_error != true) {
         //write ordered to file
         std::string outfile = filename.substr(0, filename.size() - 4); // remove the SUFFIX (i.e., .zip)
