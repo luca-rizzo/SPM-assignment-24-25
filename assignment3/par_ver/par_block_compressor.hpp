@@ -43,7 +43,7 @@ inline void write_header(const vector<CompBlockInfo> &blocks, std::ofstream &out
     outFile.write(reinterpret_cast<const char *>(&block_size), sizeof(size_t));
     outFile.write(reinterpret_cast<const char *>(&last_block_size), sizeof(size_t));
     size_t offset = 0;
-    for (const auto& blk: blocks) {
+    for (const auto &blk: blocks) {
         size_t comp_size = blk.comp_block_size;
         outFile.write(reinterpret_cast<const char *>(&comp_size), sizeof(size_t));
         outFile.write(reinterpret_cast<const char *>(&offset), sizeof(size_t));
@@ -82,28 +82,30 @@ static inline bool block_compress(const string &filename, const CompressionParam
             blocks[block_index] = CompBlockInfo{cmp_len, eff_block_size, ptrOut};
         }
     }
-    if (any_error != true) {
-        //write ordered to file
-        //printf("Thread %d writes compressed blocks of file %s\n", omp_get_thread_num(), filename.c_str());
-        std::ofstream outFile(filename + COMP_FILE_SUFFIX, std::ios::binary);
-        if (!outFile.is_open()) {
-            log_msg(ERROR, cpar, "Cannot open output file %s!\n", filename.c_str());
-            any_error = true;
-        } else {
-            //Write header
+    if (!any_error) {
+        auto compressed_filename = filename + COMP_FILE_SUFFIX;
+        try {
+            // printf("Thread %d writes compressed blocks of file %s\n", omp_get_thread_num(), filename.c_str());
+            std::ofstream outFile;
+            outFile.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+            outFile.open(filename + COMP_FILE_SUFFIX, std::ios::binary);
+            // Write header
             write_header(blocks, outFile);
-            //Write blocks content
+            // Write blocks content
             for (const auto &blk: blocks) {
                 outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.comp_block_size);
             }
             outFile.close();
+        } catch (const std::ios_base::failure &e) {
+            log_msg(ERROR, cpar, "I/O error writing file %s: %s\n", filename.c_str(), e.what());
+            filesystem::remove(compressed_filename);
+            any_error = true;
         }
     }
     for (const auto &blk: blocks) {
         delete[] blk.ptr;
     }
     unmapFile(ptr, filesize, cpar);
-
 
     return !any_error;
 }

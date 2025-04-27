@@ -87,20 +87,24 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
             decompr_blocks[block_index] = DecompBlockInfo{orig_len, ptrOut};
         }
     }
-    if (any_error != true) {
-        //write ordered to file
-        std::string outfile = filename.substr(0, filename.size() - 4); // remove the SUFFIX (i.e., .zip)
-        std::ofstream outFile(outfile, std::ios::binary);
-        if (!outFile.is_open()) {
-            log_msg(ERROR, cpar, "Cannot open output file!\n");
-            any_error = true;
-        } else {
-            for (const auto &blk: decompr_blocks) {
+    if (!any_error) {
+        std::string outfile = filename.substr(0, filename.size() - COMP_FILE_SUFFIX.size()); // remove the SUFFIX (i.e., .zip)
+        try {
+            std::ofstream outFile;
+            outFile.exceptions(std::ofstream::failbit | std::ofstream::badbit);
+            outFile.open(outfile, std::ios::binary);
+
+            for (const auto &blk : decompr_blocks) {
                 outFile.write(reinterpret_cast<const char *>(blk.ptr), blk.block_size);
             }
             outFile.close();
+        } catch (const std::ios_base::failure &e) {
+            log_msg(ERROR, cpar, "I/O error writing decompressed file %s: %s\n", outfile.c_str(), e.what());
+            std::filesystem::remove(outfile);
+            any_error = true;
         }
     }
+
     for (const auto &blk: decompr_blocks) {
         delete[] blk.ptr;
     }
