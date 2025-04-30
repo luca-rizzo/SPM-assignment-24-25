@@ -83,16 +83,20 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
 #pragma omp taskloop grainsize(1) shared(decompr_blocks, block_header, data_ptr) reduction(|:any_error) if (block_header.size() > 1)
     for (size_t i = 0; i < block_header.size(); i++) {
         DecompBlockHeaderInfo blk = block_header[i];
-        auto *ptrOut = new unsigned char[blk.orig_block_size];
+        auto *ptr_out = new (nothrow) unsigned char[blk.orig_block_size];
+        if (!ptr_out) {
+            log_msg(ERROR, cpar, "Memory allocation failed for block %lu\n", i);
+            any_error = true;
+            continue;
+        }
         unsigned char *inPtr = data_ptr + blk.offset;
         mz_ulong orig_len = blk.orig_block_size;
-        int cmp_status = uncompress(ptrOut, &orig_len, inPtr, blk.comp_block_size);
-        if (cmp_status != Z_OK) {
+        if (uncompress(ptr_out, &orig_len, inPtr, blk.comp_block_size) != Z_OK) {
             log_msg(ERROR, cpar, "uncompress failed!\n", filename.c_str());
             any_error = true;
         } else {
             size_t block_index = i;
-            decompr_blocks[block_index] = DecompBlockInfo{orig_len, ptrOut};
+            decompr_blocks[block_index] = DecompBlockInfo{orig_len, ptr_out};
         }
     }
     if (any_error) {

@@ -87,6 +87,9 @@ static inline bool allocateFile(const char fname[], const size_t size, unsigned 
 
 // unmap a previously memory-mapped file
 static inline void unmapFile(unsigned char *ptr, size_t size, const CompressionParams &cpar) {
+    if(ptr == nullptr) {
+        return;
+    }
     if (munmap(ptr, size) < 0) {
         if (cpar.quite_mode >= 1) {
             perror("nummap");

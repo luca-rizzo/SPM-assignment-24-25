@@ -148,7 +148,12 @@ static bool block_compress(const string &filename, const CompressionParams &cpar
         unsigned char *prt_in = original_mm_file + i;
         mz_ulong cmp_len = compressBound(eff_block_size);
 
-        auto *ptr_out = new unsigned char[cmp_len];
+        auto *ptr_out = new (nothrow) unsigned char[cmp_len];
+        if (!ptr_out) {
+            log_msg(ERROR, cpar, "Memory allocation failed for block %lu\n", i);
+            any_error = true;
+            continue;
+        }
         if (compress(ptr_out, &cmp_len, prt_in, eff_block_size) != Z_OK) {
             log_msg(ERROR, cpar, "Error compressing block %lu of file %s\n", i, filename.c_str());
             delete[] ptr_out;
