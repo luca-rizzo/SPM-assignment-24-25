@@ -38,19 +38,16 @@ inline void write_header(unsigned char *compressed_ptr,
 }
 
 inline void seq_write_header(const vector<CompBlockInfo> &blocks, std::ofstream &outFile) {
-    //header: num_blocks block_size last_block_size comp_size_1 offset_1...comp_size_n offset_n
+    //header: num_blocks block_size last_block_size offset_1... offset_n
     size_t num_blocks = blocks.size();
     size_t block_size = blocks[0].orig_block_size;
     size_t last_block_size = blocks[num_blocks - 1].orig_block_size;
     outFile.write(reinterpret_cast<const char *>(&num_blocks), sizeof(size_t));
     outFile.write(reinterpret_cast<const char *>(&block_size), sizeof(size_t));
     outFile.write(reinterpret_cast<const char *>(&last_block_size), sizeof(size_t));
-    size_t offset = 0;
     for (const auto &blk: blocks) {
         size_t comp_size = blk.comp_block_size;
         outFile.write(reinterpret_cast<const char *>(&comp_size), sizeof(size_t));
-        outFile.write(reinterpret_cast<const char *>(&offset), sizeof(size_t));
-        offset += comp_size;
     }
 }
 
@@ -70,24 +67,21 @@ inline size_t calculate_compressed_dim(const vector<CompBlockInfo> &blocks,
     size_t num_blocks = blocks.size();
     size_t block_size = blocks[0].orig_block_size;
     size_t last_block_size = blocks[num_blocks - 1].orig_block_size;
-    header.reserve(3 + blocks.size() * 2);
+    header.reserve(3 + blocks.size());
     header.push_back(num_blocks);
     header.push_back(block_size);
     header.push_back(last_block_size);
-    size_t offset = 0;
-    size_t in_file_offset = sizeof(size_t) * (3 + blocks.size() * 2);
+    size_t in_file_offset = sizeof(size_t) * (3 + blocks.size());
     for (size_t i = 0; i < blocks.size(); ++i) {
         const auto &blk = blocks[i];
         header.push_back(blk.comp_block_size);
-        header.push_back(offset);
         write_offsets[i] = in_file_offset;
-        offset += blk.comp_block_size;
         in_file_offset += blk.comp_block_size;
     }
 
     size_t header_size = header.size() * sizeof(size_t);
 
-    return header_size + offset;
+    return header_size + in_file_offset;
 }
 
 inline bool par_write_comp_file(const string &compressed_filename, const CompressionParams &cpar,

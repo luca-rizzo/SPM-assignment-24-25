@@ -26,7 +26,7 @@ typedef struct DecompBlockHeaderInfo {
 } DecompBlockHeaderInfo;
 
 inline vector<DecompBlockHeaderInfo> read_header(unsigned char *ptr) {
-    //header: num_blocks block_size last_block_size comp_size_1 offset_1...comp_size_n offset_n
+    //header: num_blocks block_size last_block_size comp_size_1 ...comp_size_n
     vector<DecompBlockHeaderInfo> blocks;
     unsigned char *cur = ptr;
     size_t num_blocks = *reinterpret_cast<size_t *>(cur);
@@ -40,16 +40,16 @@ inline vector<DecompBlockHeaderInfo> read_header(unsigned char *ptr) {
         return blocks;
 
     blocks.resize(num_blocks);
+    size_t offset = 0;
     for (size_t i = 0; i < num_blocks; ++i) {
         size_t comp_size = *reinterpret_cast<size_t *>(cur);
-        cur += sizeof(size_t);
-        size_t offset = *reinterpret_cast<size_t *>(cur);
         cur += sizeof(size_t);
         blocks[i] = DecompBlockHeaderInfo{
             block_size,
             comp_size,
             offset
         };
+        offset += comp_size;
     }
     blocks[num_blocks - 1].orig_block_size = last_block_size;
     return blocks;
@@ -77,7 +77,7 @@ static bool block_decompress(const string &filename, const CompressionParams &cp
     vector<DecompBlockHeaderInfo> block_header = read_header(ptr);
     vector<DecompBlockInfo> decompr_blocks;
     decompr_blocks.resize(block_header.size());
-    size_t header_size = sizeof(size_t) * 3 + block_header.size() * (sizeof(size_t) * 2);
+    size_t header_size = sizeof(size_t) * 3 + block_header.size() * sizeof(size_t);
     unsigned char *data_ptr = ptr + header_size;
     bool any_error = false;
 #pragma omp taskloop grainsize(1) shared(decompr_blocks, block_header, data_ptr) reduction(|:any_error) if (block_header.size() > 1)
