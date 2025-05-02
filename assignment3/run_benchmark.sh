@@ -60,7 +60,7 @@ for dataset in large small mixed; do
   run_and_measure "minizseq" "1" "$dataset" "seq_w_stream" "$DECOMPRESSION_OP" "./minizseq -r 1 -D 0 $TEST_DIR/$dataset"
 done
 
-sleep 1
+sleep 3
 
 echo "Cleaning all test files..."
 make clean_test_file
