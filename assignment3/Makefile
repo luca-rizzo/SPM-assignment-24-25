@@ -8,7 +8,7 @@ OPTFLAGS	= -O3 -ffast-math -DNDEBUG
 TARGETS		= minizseq minizpar
 PAR_DEPENDENCIES = par_ver/par_utility.hpp par_ver/cmdline_param_parser.hpp par_ver/par_block_compressor.hpp par_ver/par_block_decompressor.hpp
 
-.PHONY: all clean clean_exec clean_test_file compile_all clean_compression_test_file compile_all
+.PHONY: all clean clean_exec clean_test_file clean_compression_test_file compile_all
 .SUFFIXES: .cpp
 
 example%: miniz/examples/example%.c

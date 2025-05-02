@@ -29,6 +29,7 @@ bool execute_op(const string &filename, const CompressionParams &cpar) {
     return local_success;
 }
 
+//recursive function to collect all file in a dir and (based on flag) also subdir
 vector<string> recurse_and_collect(const string &dir_to_traverse, bool scan_subdirectories) {
     vector<string> sub_files;
     for (const auto &entry: fs::directory_iterator(dir_to_traverse)) {
@@ -58,12 +59,14 @@ vector<string> collect_all_files(const CompressionParams &cpar) {
 int main(int argc, char *argv[]) {
     CompressionParams cpar = parseCommandLine(argc, argv);
     TIMERSTART(minizpar)
+    //as first thing collect all file to compress
     vector<string> all_files = collect_all_files(cpar);
     bool global_success = true;
 #pragma omp parallel
     {
 #pragma omp single
         {
+            //create a task for each file
 #pragma omp taskloop grainsize(1) shared(all_files) reduction(&:global_success)
             for (const std::string &file_name: all_files) {
                 global_success = execute_op(file_name, cpar);

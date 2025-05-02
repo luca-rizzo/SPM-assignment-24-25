@@ -96,11 +96,13 @@ inline bool par_write_comp_file(const string &compressed_filename, const Compres
         return false;
     }
     write_header(compressed_mm_file, header);
+    // each thread write in an independent write block
 #pragma omp taskloop grainsize(1) shared(blocks, write_offsets, compressed_mm_file) if (blocks.size() > 1)
     for (size_t i = 0; i < blocks.size(); ++i) {
         unsigned char *start_block = compressed_mm_file + write_offsets[i];
         memcpy(start_block, blocks[i].ptr, blocks[i].comp_block_size);
     }
+    //final unmap of principal thread
     unmapFile(compressed_mm_file, compressed_file_size, cpar);
     return true;
 }
@@ -141,7 +143,7 @@ static bool block_compress(const string &filename, const CompressionParams &cpar
     size_t num_blocks = (filesize + block_size - 1) / block_size;
     blocks.resize(num_blocks);
     bool any_error = false;
-
+    //each threads compress a blocks and save the reference in blocks vector
 #pragma omp taskloop grainsize(1) shared(blocks, original_mm_file) reduction(|:any_error) if (num_blocks > 1)
     for (size_t i = 0; i < filesize; i += block_size) {
         size_t eff_block_size = min(block_size, filesize - i);

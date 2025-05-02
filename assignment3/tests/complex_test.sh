@@ -2,7 +2,7 @@
 
 set -e
 
-make clean_all
+make clean_exec
 make minizpar
 
 TEST_DIR="./tests"

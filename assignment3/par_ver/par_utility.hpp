@@ -96,5 +96,6 @@ static inline void unmapFile(unsigned char *ptr, size_t size, const CompressionP
             std::fprintf(stderr, "Failed to unmap file\n");
         }
     }
+    msync(ptr, size, MS_SYNC);
 }
 #endif //PAR_UTILITY_H

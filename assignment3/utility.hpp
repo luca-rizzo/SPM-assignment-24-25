@@ -64,6 +64,7 @@ static inline void unmapFile(unsigned char *ptr, size_t size) {
 			std::fprintf(stderr, "Failed to unmap file\n");
 		}
     }
+	msync(ptr, size, MS_SYNC);
 }
 // create an empty file of size 'size' and maps it in memory returning
 // the pointer into 'ptr'
