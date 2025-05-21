@@ -35,8 +35,6 @@ struct Worker : ff_minode_t<Task> {
 
     Task *svc(Task *in) {
         if (in->base) {
-            cout<<"base case task" << endl;
-
             BaseCaseTask *base_case_task = in->base;
             auto first = to_sort.begin();
             auto last = to_sort.begin();
@@ -48,6 +46,9 @@ struct Worker : ff_minode_t<Task> {
         } else {
             cout<<"Merge task" << endl;
             MergeTask *merge_task = in->merge_task;
+            cout << "Left Start Index: " << merge_task->left_start_index << endl;
+            cout << "Left End Index: " << merge_task->left_end_index << endl;
+            cout << "Right End Index: " << merge_task->right_end_index << endl;
             merge(to_sort, merge_task->left_start_index,
                   merge_task->left_end_index,
                   merge_task->right_end_index);
@@ -60,8 +61,7 @@ struct Worker : ff_minode_t<Task> {
 
 struct Master : ff_monode_t<Task> {
     Master(vector<reference_wrapper<Record> > &to_sort): to_sort(to_sort) {
-        max_level = static_cast<size_t>(log2(to_sort.size() / CUTOFF)) + 1;
-        cout << "max_level = " << max_level << endl;
+        max_level = static_cast<size_t>(log2(to_sort.size() / CUTOFF));
     }
 
     Task *svc(Task *in) {
@@ -81,22 +81,16 @@ struct Master : ff_monode_t<Task> {
         //ho ricevuto tutte le notifiche di merge per il livello corrente
         merge_per_level++;
         if (merge_per_level == expected_merges) {
-            current_level++;
-            merge_per_level = 0;
             if (current_level == max_level) {
                 return EOS;
             }
-
             size_t size = to_sort.size();
-            size_t merged_partition_length = (1ULL << (current_level - 1)) * CUTOFF;
-            cout<< merged_partition_length <<endl;
+            size_t merged_partition_length = (1ULL << current_level) * CUTOFF;
 
             expected_merges = 0;
             for (size_t i = 0; i < size; i += 2 * merged_partition_length) {
                 size_t left_end = min(i + merged_partition_length - 1, size - 1);
                 size_t right_end = min(i + 2 * merged_partition_length - 1, size - 1);
-                    cout<< left_end <<endl;
-                    cout<< right_end <<endl;
                 if (left_end < right_end) {
                     Task *task = new Task();
                     task->merge_task = new MergeTask{i, left_end, right_end};
@@ -105,7 +99,8 @@ struct Master : ff_monode_t<Task> {
                     expected_merges++;
                 }
             }
-
+            current_level++;
+            merge_per_level = 0;
         }
         return GO_ON;
     }
@@ -125,6 +120,7 @@ struct Master : ff_monode_t<Task> {
     size_t current_level = 0;
     size_t merge_per_level = 0;
     size_t expected_merges = 0;
+    pair<size_t, size_t> remained;
     int par_degree;
 };
 
