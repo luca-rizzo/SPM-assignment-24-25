@@ -30,6 +30,13 @@ inline bool record_comp(const Record &a, const Record &b) {
 //first is vector[start, middle]
 //second is vector[middle + 1, end]
 inline void merge(vector<reference_wrapper<Record> > &to_sort, size_t start, size_t middle, size_t end) {
+    if (end >= to_sort.size() || start > middle || middle >= end) {
+        std::cerr << "[merge] Invalid indices: start=" << start
+                  << " middle=" << middle
+                  << " end=" << end
+                  << " (size=" << to_sort.size() << ")" << std::endl;
+        std::exit(1);
+    }
     vector<reference_wrapper<Record> > temp;
     temp.reserve(end - start + 1);
 
