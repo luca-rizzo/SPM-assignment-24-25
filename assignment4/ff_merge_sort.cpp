@@ -44,11 +44,7 @@ struct Worker : ff_minode_t<Task> {
                 return !record_comp(a.get(), b.get());
             });
         } else {
-            cout<<"Merge task" << endl;
             MergeTask *merge_task = in->merge_task;
-            cout << "Left Start Index: " << merge_task->left_start_index << endl;
-            cout << "Left End Index: " << merge_task->left_end_index << endl;
-            cout << "Right End Index: " << merge_task->right_end_index << endl;
             merge(to_sort, merge_task->left_start_index,
                   merge_task->left_end_index,
                   merge_task->right_end_index);
@@ -62,6 +58,7 @@ struct Worker : ff_minode_t<Task> {
 struct Master : ff_monode_t<Task> {
     Master(vector<reference_wrapper<Record> > &to_sort): to_sort(to_sort) {
         max_level = static_cast<size_t>(log2(to_sort.size() / CUTOFF));
+        current_level_merge = deque<Task *>();
     }
 
     Task *svc(Task *in) {
@@ -73,32 +70,68 @@ struct Master : ff_monode_t<Task> {
                 Task *task = new Task();
                 task->base = new BaseCaseTask(i, task_end_index);
                 ff_send_out(task);
+                current_level_merge.push_back(task);
                 expected_merges++;
             }
             return GO_ON;
         }
-        free_task(in);
         //ho ricevuto tutte le notifiche di merge per il livello corrente
         merge_per_level++;
         if (merge_per_level == expected_merges) {
             if (current_level == max_level) {
+                if (current_level_merge.size() == 2) {
+                    Task* l_task = current_level_merge.front();
+                    current_level_merge.pop_front();
+                    Task* r_task = current_level_merge.front();
+                    current_level_merge.pop_front();
+                    size_t left_start_index = l_task->base
+                                                  ? l_task->base->start_index
+                                                  : l_task->merge_task->left_start_index;
+                    size_t left_end_index = l_task->base ? l_task->base->end_index : l_task->merge_task->right_end_index;
+                    size_t right_end_index = r_task->base ? r_task->base->end_index : r_task->merge_task->right_end_index;
+                    std::cout << "[merge] left_start = " << left_start_index
+                              << ", left_end = " << left_end_index
+                              << ", right_end = " << right_end_index << std::endl;
+
+                    Task *task = new Task();
+                    task->merge_task = new MergeTask{left_start_index, left_end_index, right_end_index};
+                    task->base = nullptr;
+                    merge_per_level = 0;
+                    expected_merges = 1;
+                    ff_send_out(task);
+                    return GO_ON;
+                }
                 return EOS;
             }
-            size_t size = to_sort.size();
-            size_t merged_partition_length = (1ULL << current_level) * CUTOFF;
-
+            size_t size = current_level_merge.size();
+            deque<Task *> nextLevelMerge = deque<Task *>();
             expected_merges = 0;
-            for (size_t i = 0; i < size; i += 2 * merged_partition_length) {
-                size_t left_end = min(i + merged_partition_length - 1, size - 1);
-                size_t right_end = min(i + 2 * merged_partition_length - 1, size - 1);
-                if (left_end < right_end) {
-                    Task *task = new Task();
-                    task->merge_task = new MergeTask{i, left_end, right_end};
-                    task->base = nullptr;
-                    ff_send_out(task);
-                    expected_merges++;
-                }
+            for (size_t i = 0; i + 1 < size; i += 2) {
+                Task* l_task = current_level_merge.front();
+                current_level_merge.pop_front();
+                Task* r_task = current_level_merge.front();
+                current_level_merge.pop_front();
+                size_t left_start_index = l_task->base
+                                              ? l_task->base->start_index
+                                              : l_task->merge_task->left_start_index;
+                size_t left_end_index = l_task->base ? l_task->base->end_index : l_task->merge_task->right_end_index;
+                size_t right_end_index = r_task->base ? r_task->base->end_index : r_task->merge_task->right_end_index;
+                std::cout << "[merge] left_start = " << left_start_index
+                          << ", left_end = " << left_end_index
+                          << ", right_end = " << right_end_index << std::endl;
+
+                Task *task = new Task();
+                task->merge_task = new MergeTask{left_start_index, left_end_index, right_end_index};
+                task->base = nullptr;
+                ff_send_out(task);
+                nextLevelMerge.push_back(task);
+                expected_merges++;
             }
+            cout << size << endl;
+            if (size % 2 != 0) {
+                nextLevelMerge.push_back(current_level_merge.front());
+            }
+            current_level_merge = std::move(nextLevelMerge);
             current_level++;
             merge_per_level = 0;
         }
@@ -120,7 +153,7 @@ struct Master : ff_monode_t<Task> {
     size_t current_level = 0;
     size_t merge_per_level = 0;
     size_t expected_merges = 0;
-    pair<size_t, size_t> remained;
+    deque<Task *> current_level_merge;
     int par_degree;
 };
 
