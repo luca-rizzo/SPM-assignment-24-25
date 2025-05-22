@@ -24,8 +24,19 @@ struct BaseCaseTask {
 };
 
 struct Task {
-    BaseCaseTask *base;
-    MergeTask *merge_task;
+    std::variant<std::monostate, BaseCaseTask, MergeTask> payload;
+
+    bool is_base() const {
+        return std::holds_alternative<BaseCaseTask>(payload);
+    }
+
+    BaseCaseTask &as_base() {
+        return std::get<BaseCaseTask>(payload);
+    }
+
+    MergeTask &as_merge() {
+        return std::get<MergeTask>(payload);
+    }
 };
 
 struct Worker : ff_minode_t<Task> {
@@ -33,20 +44,20 @@ struct Worker : ff_minode_t<Task> {
     }
 
     Task *svc(Task *in) {
-        if (in->base) {
-            BaseCaseTask *base_case_task = in->base;
+        if (in->is_base()) {
+            BaseCaseTask base_case_task = in->as_base();
             auto first = to_sort.begin();
             auto last = to_sort.begin();
-            std::advance(first, base_case_task->start_index);
-            std::advance(last, base_case_task->end_index + 1);
+            std::advance(first, base_case_task.start_index);
+            std::advance(last, base_case_task.end_index + 1);
             std::sort(first, last, [](auto &a, auto &b) {
                 return second_bigger(a.get(), b.get());
             });
         } else {
-            MergeTask *merge_task = in->merge_task;
-            merge(to_sort, merge_task->left_start_index,
-                  merge_task->left_end_index,
-                  merge_task->right_end_index);
+            MergeTask merge_task = in->as_merge();
+            merge(to_sort, merge_task.left_start_index,
+                  merge_task.left_end_index,
+                  merge_task.right_end_index);
         }
         return in;
     }
@@ -66,16 +77,16 @@ struct Master : ff_monode_t<Task> {
         current_level_merge.pop_front();
         Task *r_task = current_level_merge.front();
         current_level_merge.pop_front();
-        size_t left_start_index = l_task->base
-                                      ? l_task->base->start_index
-                                      : l_task->merge_task->left_start_index;
-        size_t left_end_index = l_task->base ? l_task->base->end_index : l_task->merge_task->right_end_index;
-        size_t right_end_index = r_task->base ? r_task->base->end_index : r_task->merge_task->right_end_index;
+        size_t left_start_index = l_task->is_base()
+                                      ? l_task->as_base().start_index
+                                      : l_task->as_merge().left_start_index;
+        size_t left_end_index = l_task->is_base() ?
+            l_task->as_base().end_index : l_task->as_merge().right_end_index;
+        size_t right_end_index = r_task->is_base() ? r_task->as_base().end_index : r_task->as_merge().right_end_index;
         free_task(l_task);
         free_task(r_task);
         Task *task = new Task();
-        task->merge_task = new MergeTask{left_start_index, left_end_index, right_end_index};
-        task->base = nullptr;
+        task->payload = MergeTask{left_start_index, left_end_index, right_end_index};
         ff_send_out(task);
         return task;
     }
@@ -87,7 +98,7 @@ struct Master : ff_monode_t<Task> {
             for (size_t i = 0; i < size; i += CUT_OFF) {
                 size_t task_end_index = min(size - 1, i + CUT_OFF - 1);
                 Task *task = new Task();
-                task->base = new BaseCaseTask(i, task_end_index);
+                task->payload = BaseCaseTask{i, task_end_index};
                 ff_send_out(task);
                 current_level_merge.push_back(task);
                 level_merges_expected++;
@@ -120,8 +131,6 @@ struct Master : ff_monode_t<Task> {
     }
 
     static void free_task(const Task *in) {
-        delete in->merge_task;
-        delete in->base;
         delete in;
     }
 
