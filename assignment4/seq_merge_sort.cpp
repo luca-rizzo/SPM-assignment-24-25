@@ -3,14 +3,12 @@
 #include <hpc_helpers.hpp>
 #include <iostream>
 
-#include "generate_input_array.h"
-#include "merge_sort_utility.h"
+#include "generate_input_array.hpp"
+#include "merge_sort_utility.hpp"
 
 #define CUTOFF 2000
 
 using namespace std;
-
-
 
 void merge_sort(vector<reference_wrapper<Record> > &to_sort, size_t start, size_t end) {
     size_t size = end - start + 1;
@@ -20,7 +18,7 @@ void merge_sort(vector<reference_wrapper<Record> > &to_sort, size_t start, size_
         std::advance(first, start);
         std::advance(last, end + 1);
         std::sort(first, last, [](auto& a, auto& b) {
-            return !record_comp(a.get(), b.get());
+            return second_biggseq_merge_sort.cpper(a.get(), b.get());
         });
         return;
     }

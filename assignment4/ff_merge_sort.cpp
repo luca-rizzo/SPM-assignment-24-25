@@ -3,8 +3,8 @@
 #include <ff/ff.hpp>
 
 #include "cmdline_merge_parser.hpp"
-#include "generate_input_array.h"
-#include "merge_sort_utility.h"
+#include "generate_input_array.hpp"
+#include "merge_sort_utility.hpp"
 
 using namespace ff;
 using namespace std;
@@ -40,7 +40,7 @@ struct Worker : ff_minode_t<Task> {
             std::advance(first, base_case_task->start_index);
             std::advance(last, base_case_task->end_index + 1);
             std::sort(first, last, [](auto &a, auto &b) {
-                return !record_comp(a.get(), b.get());
+                return second_bigger(a.get(), b.get());
             });
         } else {
             MergeTask *merge_task = in->merge_task;
@@ -55,7 +55,8 @@ struct Worker : ff_minode_t<Task> {
 };
 
 struct Master : ff_monode_t<Task> {
-    Master(vector<reference_wrapper<Record> > &to_sort, int par_degree): to_sort(to_sort), par_degree(par_degree) {
+    Master(vector<reference_wrapper<Record> > &to_sort, size_t par_degree): to_sort(to_sort), par_degree(par_degree),
+                                                                            reusable_tasks(par_degree) {
         current_level_merge = deque<Task *>();
         CUT_OFF = to_sort.size() / par_degree;
     }
@@ -70,8 +71,8 @@ struct Master : ff_monode_t<Task> {
                                       : l_task->merge_task->left_start_index;
         size_t left_end_index = l_task->base ? l_task->base->end_index : l_task->merge_task->right_end_index;
         size_t right_end_index = r_task->base ? r_task->base->end_index : r_task->merge_task->right_end_index;
-        //free_task(l_task);
-        //free_task(r_task);
+        free_task(l_task);
+        free_task(r_task);
         Task *task = new Task();
         task->merge_task = new MergeTask{left_start_index, left_end_index, right_end_index};
         task->base = nullptr;
@@ -96,6 +97,12 @@ struct Master : ff_monode_t<Task> {
         level_merges_completed++;
         //ho ricevuto tutte le notifiche di merge per il livello corrente
         if (level_merges_completed == level_merges_expected) {
+            if (current_level_merge.size() == 1) {
+                Task *task = current_level_merge.front();
+                current_level_merge.pop_front();
+                free_task(task);
+                return EOS;
+            }
             deque<Task *> nextLevelMerge = deque<Task *>();
             level_merges_expected = 0;
             while (current_level_merge.size() > 1) {
@@ -108,11 +115,6 @@ struct Master : ff_monode_t<Task> {
             }
             current_level_merge = std::move(nextLevelMerge);
             level_merges_completed = 0;
-            if (current_level_merge.size() == 1) {
-                Task *task = current_level_merge.front();
-                //free_task(task);
-                return EOS;
-            }
         }
         return GO_ON;
     }
@@ -127,6 +129,7 @@ struct Master : ff_monode_t<Task> {
     size_t level_merges_completed = 0;
     size_t level_merges_expected = 0;
     size_t CUT_OFF;
+    vector<Task> reusable_tasks;
     deque<Task *> current_level_merge;
     int par_degree;
 };
@@ -139,14 +142,15 @@ int main(int argc, char **argv) {
     vector<reference_wrapper<Record> > refs(to_sort.begin(), to_sort.end());
     // create a farm
     ff_farm farm;
-    unsigned num_workers = running_param.ff_num_threads - 1;
+    unsigned int num_workers = running_param.ff_num_threads - 1;
     Master m(refs, num_workers);
     farm.add_emitter(&m);
     std::vector<ff_node *> W;
-    for (int i = 0; i < num_workers; ++i) W.push_back(new Worker(refs));
+    for (size_t i = 0; i < num_workers; ++i) W.push_back(new Worker(refs));
     farm.add_workers(W);
     farm.wrap_around();
     farm.cleanup_workers();
+    cout << "STARTING " << endl;
     TIMERSTART(ff_merge_sort);
     if (farm.run_and_wait_end() < 0) {
         error("running the farm\n");
