@@ -38,9 +38,15 @@ struct Task {
         return std::get<MergeTask>(payload);
     }
 };
+std::mutex print_mutex;
+
+void safe_print(const std::string &msg) {
+    std::lock_guard<std::mutex> lock(print_mutex);
+    std::cout << msg << std::endl;
+}
 
 struct Worker : ff_minode_t<Task> {
-    Worker(vector<reference_wrapper<Record> > &to_sort): to_sort(to_sort) {
+    explicit Worker(vector<reference_wrapper<Record> > &to_sort): to_sort(to_sort) {
     }
 
     Task *svc(Task *in) {
@@ -66,13 +72,15 @@ struct Worker : ff_minode_t<Task> {
 };
 
 struct Master : ff_monode_t<Task> {
-    Master(vector<reference_wrapper<Record> > &to_sort, size_t par_degree): to_sort(to_sort), par_degree(par_degree),
-                                                                            reusable_tasks(par_degree) {
+    Master(vector<reference_wrapper<Record> > &to_sort, int par_degree, size_t _base_case_size): to_sort(to_sort),
+        num_workers(par_degree), base_case_size(_base_case_size) {
         current_level_merge = deque<Task *>();
-        CUT_OFF = to_sort.size() / par_degree;
+        base_case_size = _base_case_size == 0 ? ceil((double) to_sort.size() / par_degree) : _base_case_size;
+        int leaf_of_merge_rec = ceil((double) to_sort.size() / base_case_size);
+        reusable_tasks = vector<Task>(leaf_of_merge_rec);
     }
 
-    Task *create_and_send_merge_task() {
+    Task *create_and_send_merge_task(int worker_to_send) {
         Task *l_task = current_level_merge.front();
         current_level_merge.pop_front();
         Task *r_task = current_level_merge.front();
@@ -80,47 +88,50 @@ struct Master : ff_monode_t<Task> {
         size_t left_start_index = l_task->is_base()
                                       ? l_task->as_base().start_index
                                       : l_task->as_merge().left_start_index;
-        size_t left_end_index = l_task->is_base() ?
-            l_task->as_base().end_index : l_task->as_merge().right_end_index;
+        size_t left_end_index = l_task->is_base() ? l_task->as_base().end_index : l_task->as_merge().right_end_index;
         size_t right_end_index = r_task->is_base() ? r_task->as_base().end_index : r_task->as_merge().right_end_index;
-        free_task(l_task);
-        free_task(r_task);
-        Task *task = new Task();
-        task->payload = MergeTask{left_start_index, left_end_index, right_end_index};
-        ff_send_out(task);
-        return task;
+        Task &task = reusable_tasks[worker_to_send];
+        task.payload = MergeTask{left_start_index, left_end_index, right_end_index};
+        ff_send_out_to(&task, worker_to_send % num_workers);
+        return &task;
     }
 
-    Task *svc(Task *in) {
+    void terminate_useless_worker() {
+        while (num_workers > level_merges_expected) {
+            --num_workers;
+            ff_send_out_to(EOS, num_workers);
+        }
+    }
+
+    Task *svc(Task *in) override {
         if (in == nullptr) {
             size_t size = to_sort.size();
             //divide for all base case
-            for (size_t i = 0; i < size; i += CUT_OFF) {
-                size_t task_end_index = min(size - 1, i + CUT_OFF - 1);
-                Task *task = new Task();
-                task->payload = BaseCaseTask{i, task_end_index};
-                ff_send_out(task);
-                current_level_merge.push_back(task);
+            for (size_t i = 0; i < size; i += base_case_size) {
+                size_t task_end_index = min(size - 1, i + base_case_size - 1);
+                Task &task = reusable_tasks[level_merges_expected];
+                task.payload = BaseCaseTask{i, task_end_index};
+                ff_send_out(&task);
+                current_level_merge.push_back(&task);
                 level_merges_expected++;
             }
             return GO_ON;
         }
         level_merges_completed++;
-        //ho ricevuto tutte le notifiche di merge per il livello corrente
+        //all notifications received for current level ?
         if (level_merges_completed == level_merges_expected) {
             if (current_level_merge.size() == 1) {
-                Task *task = current_level_merge.front();
                 current_level_merge.pop_front();
-                free_task(task);
                 return EOS;
             }
             deque<Task *> nextLevelMerge = deque<Task *>();
             level_merges_expected = 0;
             while (current_level_merge.size() > 1) {
-                Task *task = create_and_send_merge_task();
+                Task *task = create_and_send_merge_task(level_merges_expected);
                 nextLevelMerge.push_back(task);
                 level_merges_expected++;
             }
+            terminate_useless_worker();
             if (!current_level_merge.empty()) {
                 nextLevelMerge.push_back(current_level_merge.front());
             }
@@ -130,17 +141,13 @@ struct Master : ff_monode_t<Task> {
         return GO_ON;
     }
 
-    static void free_task(const Task *in) {
-        delete in;
-    }
-
     vector<reference_wrapper<Record> > &to_sort;
-    size_t level_merges_completed = 0;
-    size_t level_merges_expected = 0;
-    size_t CUT_OFF;
+    int level_merges_completed = 0;
+    int level_merges_expected = 0;
+    size_t base_case_size;
     vector<Task> reusable_tasks;
     deque<Task *> current_level_merge;
-    int par_degree;
+    int num_workers;
 };
 
 
@@ -151,11 +158,11 @@ int main(int argc, char **argv) {
     vector<reference_wrapper<Record> > refs(to_sort.begin(), to_sort.end());
     // create a farm
     ff_farm farm;
-    unsigned int num_workers = running_param.ff_num_threads - 1;
-    Master m(refs, num_workers);
+    int num_workers = running_param.ff_num_threads - 1;
+    Master m(refs, num_workers, running_param.base_case_size);
     farm.add_emitter(&m);
     std::vector<ff_node *> W;
-    for (size_t i = 0; i < num_workers; ++i) W.push_back(new Worker(refs));
+    for (int i = 0; i < num_workers; ++i) W.push_back(new Worker(refs));
     farm.add_workers(W);
     farm.wrap_around();
     farm.cleanup_workers();

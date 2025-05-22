@@ -11,6 +11,8 @@ using namespace std;
 struct RunningParam {
     size_t array_size;
     size_t record_payload_size;
+    //0 means ceil(size/ff_num_threads)
+    size_t base_case_size;
     unsigned int ff_num_threads;
 };
 
@@ -31,8 +33,8 @@ inline bool isNumber(const char *s, long &n) {
 }
 
 static RunningParam parseCommandLine(int argc, char *argv[]) {
-    RunningParam params(10240, 1024, 8);
-    const std::string optstr = "r:s:t:";
+    RunningParam params(10240, 1024, 0, 8);
+    const std::string optstr = "r:s:t:b:";
     long opt;
     while ((opt = getopt(argc, argv, optstr.c_str())) != -1) {
         switch (opt) {
@@ -44,6 +46,16 @@ static RunningParam parseCommandLine(int argc, char *argv[]) {
                     exit(EXIT_FAILURE);
                 }
                 params.record_payload_size = r_val;
+            }
+            break;
+            case 'b': {
+                long b_val = 0;
+                if (!isNumber(optarg, b_val)) {
+                    std::fprintf(stderr, "Error: wrong '-b' option\n");
+                    usage(argv[0]);
+                    exit(EXIT_FAILURE);
+                }
+                params.base_case_size = b_val;
             }
             break;
             case 's': {
