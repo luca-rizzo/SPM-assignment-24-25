@@ -1,4 +1,5 @@
-CXXFLAGS            += -std=c++20
+CXX		= g++ -std=c++20
+CXX_MPI                = mpicxx -std=c++20
 ifdef DEBUG
     OPTIMIZE_FLAGS  += -g -fno-inline-functions
 else
@@ -30,8 +31,13 @@ TARGET               = $(SOURCES:.cpp=)
 		[ -s $@ ] || rm -f $@
 %.o: %.c
 	$(CC) $(INCLUDES) $(CFLAGS) -c -o $@ $<
+
+mpi_merge_sort: mpi_merge_sort.cpp
+	$(CXX_MPI) $(INCLUDES) $(CXXFLAGS) $(OPTFLAGS) -o $@ $< $(LIBS)
+
 %: %.cpp
 	$(CXX) $(INCLUDES) $(CXXFLAGS) $(OPTIMIZE_FLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
+
 
 all: $(TARGET)
 

@@ -1,6 +1,6 @@
 #include <variant>
 #include <vector>
-#include <ff/ff.hpp>
+#include <ff.hpp>
 
 #include "cmdline_merge_parser.hpp"
 #include "generate_input_array.hpp"
@@ -38,12 +38,6 @@ struct Task {
         return std::get<MergeTask>(payload);
     }
 };
-std::mutex print_mutex;
-
-void safe_print(const std::string &msg) {
-    std::lock_guard<std::mutex> lock(print_mutex);
-    std::cout << msg << std::endl;
-}
 
 struct Worker : ff_minode_t<Task> {
     explicit Worker(vector<reference_wrapper<Record> > &to_sort): to_sort(to_sort) {
