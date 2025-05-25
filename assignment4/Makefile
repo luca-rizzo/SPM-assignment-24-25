@@ -16,7 +16,7 @@ LIBS                 = -pthread
 INCLUDES             = $(INCS) -I ./include
 
 SOURCES              = $(wildcard *.cpp)
-TARGET               = $(SOURCES:.cpp=)
+TARGET               = seq_merge_sort mpi_merge_sort ff_merge_sort
 
 .PHONY: all clean cleanall 
 .SUFFIXES: .c .cpp .o

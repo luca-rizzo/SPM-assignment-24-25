@@ -18,7 +18,7 @@ void merge_sort(vector<reference_wrapper<Record> > &to_sort, size_t start, size_
         std::advance(first, start);
         std::advance(last, end + 1);
         std::sort(first, last, [](auto& a, auto& b) {
-            return second_biggseq_merge_sort.cpper(a.get(), b.get());
+            return second_bigger(a.get(), b.get());
         });
         return;
     }

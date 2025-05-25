@@ -9,7 +9,7 @@
 
 using namespace std;
 
-int get_my_rank(int COMM) {
+int get_my_rank(MPI_Comm COMM) {
     int rank;
     MPI_Comm_rank(COMM, &rank);
     return rank;
