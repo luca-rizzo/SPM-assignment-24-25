@@ -1,12 +1,12 @@
 #ifndef FF_MERGESORT_FARM_H
 #define FF_MERGESORT_FARM_H
-
+#include <variant>
+#include <vector>
+#include <ff/ff.hpp>
 #include <ff/farm.hpp>
 #include <memory>
-#include <vector>
-
-#include "generate_input_array.hpp"
-#include "merge_sort_utility.hpp"
+#include <cmath>
+#include <iostream>
 
 using namespace ff;
 using namespace std;
@@ -41,9 +41,40 @@ struct Task {
     }
 };
 
+template<std::totally_ordered T>
 struct Worker : ff_minode_t<Task> {
-    explicit Worker(vector<reference_wrapper<Record> > &to_sort): to_sort(to_sort) {
+    explicit Worker(vector<reference_wrapper<T> > &to_sort): to_sort(to_sort) {
     }
+
+    void merge(vector<reference_wrapper<T> > &to_sort, size_t start, size_t middle, size_t end) {
+        vector<reference_wrapper<T> > temp;
+        temp.reserve(end - start + 1);
+
+        size_t left = start;
+        size_t right = middle + 1;
+
+        while (left <= middle && right <= end) {
+            if (to_sort[left].get() < to_sort[right].get()) {
+                temp.push_back(to_sort[left++]);
+            } else {
+                temp.push_back(to_sort[right++]);
+            }
+        }
+
+        while (left <= middle) {
+            temp.push_back(to_sort[left++]);
+        }
+
+        while (right <= end) {
+            temp.push_back(to_sort[right++]);
+        }
+
+        // Copy back the sorted subrange
+        for (size_t i = 0; i < temp.size(); ++i) {
+            to_sort[start + i] = temp[i];
+        }
+    }
+
 
     Task *svc(Task *in) {
         if (in->is_base()) {
@@ -53,7 +84,7 @@ struct Worker : ff_minode_t<Task> {
             std::advance(first, base_case_task.start_index);
             std::advance(last, base_case_task.end_index + 1);
             std::sort(first, last, [](auto &a, auto &b) {
-                return second_bigger(a.get(), b.get());
+                return a.get() < b.get();
             });
         } else {
             MergeTask merge_task = in->as_merge();
@@ -64,11 +95,12 @@ struct Worker : ff_minode_t<Task> {
         return in;
     }
 
-    vector<reference_wrapper<Record> > &to_sort;
+    vector<reference_wrapper<T> > &to_sort;
 };
 
+template<std::totally_ordered T>
 struct Master : ff_monode_t<Task> {
-    Master(vector<reference_wrapper<Record> > &to_sort, int par_degree, size_t _base_case_size): to_sort(to_sort),
+    Master(vector<reference_wrapper<T> > &to_sort, int par_degree, size_t _base_case_size): to_sort(to_sort),
         num_workers(par_degree), base_case_size(_base_case_size) {
         current_level_merge = deque<Task *>();
         base_case_size = _base_case_size == 0 ? ceil((double) to_sort.size() / par_degree) : _base_case_size;
@@ -137,29 +169,31 @@ struct Master : ff_monode_t<Task> {
         return GO_ON;
     }
 
-    vector<reference_wrapper<Record> > &to_sort;
+    vector<reference_wrapper<T> > &to_sort;
     int level_merges_completed = 0;
     int level_merges_expected = 0;
     int num_workers;
     size_t base_case_size;
     vector<Task> reusable_tasks;
     deque<Task *> current_level_merge;
+
 };
 
+template<std::totally_ordered T>
 class ff_MergeSort_Map : public ff_Farm<void> {
 public:
-    ff_MergeSort_Map(std::vector<std::reference_wrapper<Record>> &refs,
-                      int num_workers,
-                      int base_case_size)
+    ff_MergeSort_Map(vector<reference_wrapper<T> > &refs,
+                     int num_workers,
+                     int base_case_size = 0)
         : ff_Farm(
-            [&]() {
-                vector<unique_ptr<ff_node>> W;
-                for (int i = 0; i < num_workers; ++i)
-                    W.push_back(make_unique<Worker>(refs));
-                return W;
-            }(), // workers
-            make_unique<Master>(refs, num_workers, base_case_size)
-        ) {
+              [&]() {
+                  vector<unique_ptr<ff_node> > W;
+                  for (int i = 0; i < num_workers; ++i)
+                      W.push_back(make_unique<Worker<T>>(refs));
+                  return W;
+              }(), // workers
+              make_unique<Master<T>>(refs, num_workers, base_case_size)
+          ) {
         this->remove_collector();
         this->wrap_around();
     }

@@ -1,7 +1,6 @@
 #ifndef GENERATE_INPUT_ARRAY_H
 #define GENERATE_INPUT_ARRAY_H
 #include <cstdlib>
-#include <ctime>
 #include "generate_input_array.hpp"
 #include <random>
 
@@ -9,7 +8,26 @@ using namespace std;
 
 struct Record {
     unsigned long key;
-    vector<char> payload;
+    std::vector<char> payload;
+
+    bool operator<(const Record& other) const {
+        return key < other.key;
+    }
+    bool operator>(const Record& other) const {
+        return other < *this;
+    }
+    bool operator<=(const Record& other) const {
+        return !(other < *this);
+    }
+    bool operator>=(const Record& other) const {
+        return !(*this < other);
+    }
+    bool operator==(const Record& other) const {
+        return key == other.key;
+    }
+    bool operator!=(const Record& other) const {
+        return !(*this == other);
+    }
 };
 
 inline vector<Record> generate_input_array(size_t N, size_t payload_size) {

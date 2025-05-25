@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "cmdline_merge_parser.hpp"
+#include "ff_MergeSort_Map.hpp"
 #include "generate_input_array.hpp"
 #include "hpc_helpers.hpp"
 
@@ -27,7 +28,7 @@ int get_number_of_nodes() {
     return largest_power_of_two(number_of_nodes);
 }
 
-vector<unsigned long> merge_two_sorted(const vector<unsigned long>& v1, const vector<unsigned long>& v2) {
+vector<unsigned long> merge_two_sorted(const vector<unsigned long> &v1, const vector<unsigned long> &v2) {
     vector<unsigned long> res(v1.size() + v2.size());
     size_t i = 0;
     size_t j = 0;
@@ -65,7 +66,7 @@ bool am_i_sender(int rank, int level) {
     return (rank % group_size) == (1 << level);
 }
 
-inline bool check_sort(const vector<unsigned long > &sorted) {
+inline bool check_sort(const vector<unsigned long> &sorted) {
     for (size_t i = 1; i < sorted.size(); ++i) {
         if (sorted[i - 1] > sorted[i]) {
             return false;
@@ -76,15 +77,36 @@ inline bool check_sort(const vector<unsigned long > &sorted) {
 
 
 vector<unsigned long> scatter_base_case_and_sort(int number_of_nodes, MPI_Comm ACTIVE_COMM, RunningParam running_param,
-    vector<unsigned long> keys) {
-    size_t base_case_size = running_param.array_size / number_of_nodes;
-    vector<unsigned long> base_case(base_case_size);
-    MPI_Scatter(keys.data(), base_case_size, MPI_UNSIGNED_LONG, base_case.data(),
-                base_case_size, MPI_UNSIGNED_LONG, 0, ACTIVE_COMM);
-    sort(base_case.begin(), base_case.end(), [](auto &a, auto &b) {
-        return b > a;
-    });
-    return base_case;
+                                                 vector<unsigned long> keys) {
+    int rank;
+    MPI_Comm_rank(ACTIVE_COMM, &rank);
+    size_t chunk_size = static_cast<size_t>(
+        std::ceil(static_cast<double>(running_param.array_size) / number_of_nodes)
+    );
+
+    std::vector<int> sendcounts(number_of_nodes);
+    std::vector<int> displs(number_of_nodes);
+
+    for (int i = 0; i < number_of_nodes; ++i) {
+        int start = i * chunk_size;
+        int end = std::min(start + chunk_size, running_param.array_size);
+        sendcounts[i] = end - start;
+        displs[i] = start;
+    }
+
+    std::vector<unsigned long> base_case(sendcounts[rank]);
+
+    MPI_Scatterv(keys.data(), sendcounts.data(), displs.data(), MPI_UNSIGNED_LONG,
+                 base_case.data(), sendcounts[rank], MPI_UNSIGNED_LONG, 0, ACTIVE_COMM);
+
+    vector<reference_wrapper<unsigned long> > refs(base_case.begin(), base_case.end());
+    // create a map
+    ff_MergeSort_Map farm(refs, running_param.ff_num_threads - 1);
+
+    if (farm.run_and_wait_end() < 0) {
+        error("running the farm\n");
+    }
+    return vector<unsigned long>(refs.begin(), refs.end());
 }
 
 int main(int argc, char **argv) {
@@ -109,7 +131,8 @@ int main(int argc, char **argv) {
     }
     MPI_Barrier(ACTIVE_COMM);
     double t_start = MPI_Wtime();
-    std::vector<unsigned long> sorted_block = scatter_base_case_and_sort(number_of_nodes, ACTIVE_COMM, running_param, keys);
+    std::vector<unsigned long> sorted_block = scatter_base_case_and_sort(
+        number_of_nodes, ACTIVE_COMM, running_param, keys);
     size_t sub_array_level_size = sorted_block.size();
     int max_level = log2(number_of_nodes);
     int level = 0;
@@ -120,8 +143,12 @@ int main(int argc, char **argv) {
         } else if (am_i_receiver(rank, level)) {
             int sender = rank + (1 << level);
             std::vector<unsigned long> received_to_merge(sub_array_level_size);
+            MPI_Status status;
             MPI_Recv(received_to_merge.data(), sub_array_level_size, MPI_UNSIGNED_LONG, sender, 0, ACTIVE_COMM,
-                     MPI_STATUS_IGNORE);
+                     &status);
+            int real_received_count;
+            MPI_Get_count(&status, MPI_UNSIGNED_LONG, &real_received_count);
+            received_to_merge.resize(real_received_count);
             sorted_block = merge_two_sorted(sorted_block, received_to_merge);
             // in general at level 2^l we should have:
             // (base_case) * 2^l number of element already merged
@@ -131,8 +158,8 @@ int main(int argc, char **argv) {
     }
     if (rank == 0) {
         double t_stop = MPI_Wtime();
-        std::cout << "# elapsed time (mpi_merge_sort): "                       \
-        << (t_stop - t_start)  << "s" << endl;
+        std::cout << "# elapsed time (mpi_merge_sort): "
+                << (t_stop - t_start) << "s" << endl;
         cout << "Sorted: " << (check_sort(sorted_block) && sorted_block.size() == keys.size()) << endl;
     }
     MPI_Finalize();
