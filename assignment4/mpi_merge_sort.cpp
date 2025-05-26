@@ -67,7 +67,7 @@ bool am_i_sender(int rank, int level) {
 }
 
 template <typename T>
-inline bool check_sort(const vector<T> &sorted) {
+bool check_sort(const vector<T> &sorted) {
     for (size_t i = 1; i < sorted.size(); ++i) {
         if (sorted[i - 1] > sorted[i]) {
             return false;
@@ -75,7 +75,6 @@ inline bool check_sort(const vector<T> &sorted) {
     }
     return true;
 }
-
 
 vector<KeyIndex> scatter_base_case_and_sort(int number_of_nodes, MPI_Comm ACTIVE_COMM, RunningParam running_param,
                                                  const vector<KeyIndex>& keys, MPI_Datatype MPI_KEY_INDEX) {
@@ -111,16 +110,15 @@ vector<KeyIndex> scatter_base_case_and_sort(int number_of_nodes, MPI_Comm ACTIVE
     return vector<KeyIndex>(refs.begin(), refs.end());
 }
 
-MPI_Datatype create_mpi_keyindex_type() {
+MPI_Datatype create_mpi_keyindex_type_struct() {
     MPI_Datatype mpi_keyindex_type;
 
-    // 1. Campi della struct
     int block_lengths[2] = {1, 1};
     MPI_Datatype types[2] = {MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG};
     MPI_Aint displacements[2];
 
-    // 2. Calcolo degli offset (portabile)
-    KeyIndex dummy;
+    // Calculate the displacements in case of (possible) padding
+    KeyIndex dummy{};
     MPI_Aint base_address;
     MPI_Get_address(&dummy, &base_address);
     MPI_Get_address(&dummy.key, &displacements[0]);
@@ -129,11 +127,16 @@ MPI_Datatype create_mpi_keyindex_type() {
     displacements[0] -= base_address;
     displacements[1] -= base_address;
 
-    // 3. Creazione del tipo MPI
     MPI_Type_create_struct(2, block_lengths, displacements, types, &mpi_keyindex_type);
     MPI_Type_commit(&mpi_keyindex_type);
 
     return mpi_keyindex_type;
+}
+MPI_Datatype create_mpi_keyindex_type_contiguous() {
+    MPI_Datatype MPI_KEY_INDEX;
+    MPI_Type_contiguous(2, MPI_UNSIGNED_LONG, &MPI_KEY_INDEX);
+    MPI_Type_commit(&MPI_KEY_INDEX);
+    return MPI_KEY_INDEX;
 }
 
 Record& get_elem_at_position(vector<KeyIndex>& sorted_index, vector<Record>& original_array, size_t position) {
@@ -163,7 +166,7 @@ int main(int argc, char **argv) {
         to_sort = generate_input_array_to_distribute(running_param.array_size,
                                                      running_param.record_payload_size, keys);
     }
-    MPI_Datatype MPI_KEY_INDEX = create_mpi_keyindex_type();
+    MPI_Datatype MPI_KEY_INDEX = create_mpi_keyindex_type_contiguous();
     MPI_Barrier(ACTIVE_COMM);
     double t_start = MPI_Wtime();
     std::vector<KeyIndex> sorted_block = scatter_base_case_and_sort(
