@@ -60,12 +60,27 @@ static RunningParam parseCommandLine(int argc, char *argv[]) {
             break;
             case 's': {
                 long s_val = 0;
-                if (!isNumber(optarg, s_val)) {
+                std::string arg_str(optarg);
+                char suffix = arg_str.back();
+
+                long multiplier = 1;
+                if (suffix == 'K') {
+                    multiplier = 1000;
+                    arg_str.pop_back();
+                } else if (suffix == 'M') {
+                    multiplier = 1000000;
+                    arg_str.pop_back();
+                }
+
+                // Try to convert the number
+                if (!isNumber(arg_str.c_str(), s_val)) {
                     std::fprintf(stderr, "Error: wrong '-s' option\n");
                     usage(argv[0]);
                     exit(EXIT_FAILURE);
                 }
-                params.array_size = s_val;
+
+                params.array_size = s_val * multiplier;
+                break;
             }
             break;
             case 't': {
