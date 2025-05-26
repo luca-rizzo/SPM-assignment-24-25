@@ -28,8 +28,8 @@ int get_number_of_nodes() {
     return largest_power_of_two(number_of_nodes);
 }
 
-vector<unsigned long> merge_two_sorted(const vector<unsigned long> &v1, const vector<unsigned long> &v2) {
-    vector<unsigned long> res(v1.size() + v2.size());
+vector<KeyIndex> merge_two_sorted(const vector<KeyIndex> &v1, const vector<KeyIndex> &v2) {
+    vector<KeyIndex> res(v1.size() + v2.size());
     size_t i = 0;
     size_t j = 0;
     size_t k = 0;
@@ -66,7 +66,8 @@ bool am_i_sender(int rank, int level) {
     return (rank % group_size) == (1 << level);
 }
 
-inline bool check_sort(const vector<unsigned long> &sorted) {
+template <typename T>
+inline bool check_sort(const vector<T> &sorted) {
     for (size_t i = 1; i < sorted.size(); ++i) {
         if (sorted[i - 1] > sorted[i]) {
             return false;
@@ -76,8 +77,8 @@ inline bool check_sort(const vector<unsigned long> &sorted) {
 }
 
 
-vector<unsigned long> scatter_base_case_and_sort(int number_of_nodes, MPI_Comm ACTIVE_COMM, RunningParam running_param,
-                                                 vector<unsigned long> keys) {
+vector<KeyIndex> scatter_base_case_and_sort(int number_of_nodes, MPI_Comm ACTIVE_COMM, RunningParam running_param,
+                                                 const vector<KeyIndex>& keys, MPI_Datatype MPI_KEY_INDEX) {
     int rank;
     MPI_Comm_rank(ACTIVE_COMM, &rank);
     size_t chunk_size = static_cast<size_t>(
@@ -94,19 +95,52 @@ vector<unsigned long> scatter_base_case_and_sort(int number_of_nodes, MPI_Comm A
         displs[i] = start;
     }
 
-    std::vector<unsigned long> base_case(sendcounts[rank]);
+    std::vector<KeyIndex> base_case(sendcounts[rank]);
 
-    MPI_Scatterv(keys.data(), sendcounts.data(), displs.data(), MPI_UNSIGNED_LONG,
-                 base_case.data(), sendcounts[rank], MPI_UNSIGNED_LONG, 0, ACTIVE_COMM);
+    MPI_Scatterv(keys.data(), sendcounts.data(), displs.data(), MPI_KEY_INDEX,
+                 base_case.data(), sendcounts[rank], MPI_KEY_INDEX, 0, ACTIVE_COMM);
 
-    vector<reference_wrapper<unsigned long> > refs(base_case.begin(), base_case.end());
+    vector<reference_wrapper<KeyIndex> > refs(base_case.begin(), base_case.end());
+
     // create a map
     ff_MergeSort_Map farm(refs, running_param.ff_num_threads - 1);
 
     if (farm.run_and_wait_end() < 0) {
         error("running the farm\n");
     }
-    return vector<unsigned long>(refs.begin(), refs.end());
+    return vector<KeyIndex>(refs.begin(), refs.end());
+}
+
+MPI_Datatype create_mpi_keyindex_type() {
+    MPI_Datatype mpi_keyindex_type;
+
+    // 1. Campi della struct
+    int block_lengths[2] = {1, 1};
+    MPI_Datatype types[2] = {MPI_UNSIGNED_LONG, MPI_UNSIGNED_LONG};
+    MPI_Aint displacements[2];
+
+    // 2. Calcolo degli offset (portabile)
+    KeyIndex dummy;
+    MPI_Aint base_address;
+    MPI_Get_address(&dummy, &base_address);
+    MPI_Get_address(&dummy.key, &displacements[0]);
+    MPI_Get_address(&dummy.original_index, &displacements[1]);
+
+    displacements[0] -= base_address;
+    displacements[1] -= base_address;
+
+    // 3. Creazione del tipo MPI
+    MPI_Type_create_struct(2, block_lengths, displacements, types, &mpi_keyindex_type);
+    MPI_Type_commit(&mpi_keyindex_type);
+
+    return mpi_keyindex_type;
+}
+
+Record& get_elem_at_position(vector<KeyIndex>& sorted_index, vector<Record>& original_array, size_t position) {
+    if(sorted_index.size() < position) {
+        throw std::invalid_argument("The requested position does not exsit");
+    }
+    return original_array[sorted_index[position].original_index];
 }
 
 int main(int argc, char **argv) {
@@ -123,31 +157,32 @@ int main(int argc, char **argv) {
     }
     rank = get_my_rank(ACTIVE_COMM);
     RunningParam running_param = parseCommandLine(argc, argv);
-    vector<unsigned long> keys;
+    vector<KeyIndex> keys;
     vector<Record> to_sort;
     if (rank == 0) {
         to_sort = generate_input_array_to_distribute(running_param.array_size,
                                                      running_param.record_payload_size, keys);
     }
+    MPI_Datatype MPI_KEY_INDEX = create_mpi_keyindex_type();
     MPI_Barrier(ACTIVE_COMM);
     double t_start = MPI_Wtime();
-    std::vector<unsigned long> sorted_block = scatter_base_case_and_sort(
-        number_of_nodes, ACTIVE_COMM, running_param, keys);
+    std::vector<KeyIndex> sorted_block = scatter_base_case_and_sort(
+        number_of_nodes, ACTIVE_COMM, running_param, keys, MPI_KEY_INDEX);
     size_t sub_array_level_size = sorted_block.size();
     int max_level = log2(number_of_nodes);
     int level = 0;
     while (level < max_level) {
         if (am_i_sender(rank, level)) {
             int receiver = rank - (1 << level);
-            MPI_Send(sorted_block.data(), sub_array_level_size, MPI_UNSIGNED_LONG, receiver, 0, ACTIVE_COMM);
+            MPI_Send(sorted_block.data(), sub_array_level_size, MPI_KEY_INDEX, receiver, 0, ACTIVE_COMM);
         } else if (am_i_receiver(rank, level)) {
             int sender = rank + (1 << level);
-            std::vector<unsigned long> received_to_merge(sub_array_level_size);
+            std::vector<KeyIndex> received_to_merge(sub_array_level_size);
             MPI_Status status;
-            MPI_Recv(received_to_merge.data(), sub_array_level_size, MPI_UNSIGNED_LONG, sender, 0, ACTIVE_COMM,
-                     &status);
+            MPI_Recv(received_to_merge.data(), sub_array_level_size, MPI_KEY_INDEX,
+                sender, 0, ACTIVE_COMM, &status);
             int real_received_count;
-            MPI_Get_count(&status, MPI_UNSIGNED_LONG, &real_received_count);
+            MPI_Get_count(&status, MPI_KEY_INDEX, &real_received_count);
             received_to_merge.resize(real_received_count);
             sorted_block = merge_two_sorted(sorted_block, received_to_merge);
             // in general at level 2^l we should have:
@@ -160,7 +195,8 @@ int main(int argc, char **argv) {
         double t_stop = MPI_Wtime();
         std::cout << "# elapsed time (mpi_merge_sort): "
                 << (t_stop - t_start) << "s" << endl;
-        cout << "Sorted: " << (check_sort(sorted_block) && sorted_block.size() == keys.size()) << endl;
+        cout << "Sorted: " << (check_sort(sorted_block) && sorted_block.size() == to_sort.size()) << endl;
     }
+    MPI_Type_free(&MPI_KEY_INDEX);
     MPI_Finalize();
 }

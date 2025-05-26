@@ -46,8 +46,37 @@ inline vector<Record> generate_input_array(size_t N, size_t payload_size) {
 
     return records;
 }
+struct KeyIndex {
+    unsigned long key;
+    unsigned long original_index;
 
-inline vector<Record> generate_input_array_to_distribute(size_t N, size_t payload_size, vector<unsigned long> &keys) {
+    bool operator==(const KeyIndex& other) const {
+        return key == other.key;
+    }
+
+    bool operator!=(const KeyIndex& other) const {
+        return key != other.key;
+    }
+
+    bool operator<(const KeyIndex& other) const {
+        return key < other.key;
+    }
+
+    bool operator<=(const KeyIndex& other) const {
+        return key <= other.key;
+    }
+
+    bool operator>(const KeyIndex& other) const {
+        return key > other.key;
+    }
+
+    bool operator>=(const KeyIndex& other) const {
+        return key >= other.key;
+    }
+};
+
+
+inline vector<Record> generate_input_array_to_distribute(size_t N, size_t payload_size, vector<KeyIndex> &keys) {
     mt19937 rng(static_cast<unsigned long>(42));
     uniform_int_distribution<unsigned long> key_dist(1, 100000);
     uniform_int_distribution<char> char_dist('A', 'Z');
@@ -56,7 +85,7 @@ inline vector<Record> generate_input_array_to_distribute(size_t N, size_t payloa
     keys.resize(N);
     for (size_t i = 0; i < N; ++i) {
         records[i].key = key_dist(rng);
-        keys[i] = records[i].key;
+        keys[i] = KeyIndex(records[i].key, i);
 
         records[i].payload.resize(payload_size);
         for (size_t j = 0; j < payload_size; ++j) {
