@@ -16,9 +16,9 @@ inline bool check_sort(const vector<Record> &sorted) {
 
 inline void print_sort_res(const vector<Record> &sorted) {
     if (check_sort(sorted)) {
-        cout << "Sorting succeeded" << endl;
+        fprintf(stderr, "Sorting succeeded\n");
     } else {
-        cout << "Sorting failed" << endl;
+        fprintf(stderr, "Sorting failed\n");
     }
 }
 

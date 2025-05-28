@@ -46,7 +46,7 @@ struct Worker : ff_minode_t<Task> {
 
 template<typename T>
 struct Master : ff_monode_t<Task> {
-    Master(T *data, size_t len, int _par_degree, size_t _base_case_size)
+    Master(T *data, const size_t len, int _par_degree, size_t _base_case_size)
         : data(data),
           len(len),
           num_workers(_par_degree - 1),
@@ -146,11 +146,11 @@ struct Master : ff_monode_t<Task> {
 
     T *data;
     size_t len;
-    int num_workers;
-    int par_degree;
+    unsigned int num_workers;
+    unsigned int par_degree;
     size_t base_case_size;
-    int level_merges_expected = 0;
-    int level_merges_completed = 0;
+    unsigned int level_merges_expected = 0;
+    unsigned int level_merges_completed = 0;
     vector<Task> reusable_tasks;
     deque<Task *> current_level_merge;
 };
@@ -158,7 +158,7 @@ struct Master : ff_monode_t<Task> {
 template<typename T>
 class ff_MergeSort_Map : public ff_Farm<void> {
 public:
-    ff_MergeSort_Map(T *data, size_t len, int par_degree, int base_case_size = 0)
+    ff_MergeSort_Map(T *data, size_t len, unsigned int par_degree, unsigned int base_case_size = 0)
         : ff_Farm(
             [&]() {
                 vector<unique_ptr<ff_node> > W;

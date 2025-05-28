@@ -99,10 +99,11 @@ static RunningParam parseCommandLine(int argc, char *argv[]) {
 }
 
 static inline void debug_params(const RunningParam &run_par) {
-    printf("RunningParams:\n");
-    printf("  array size:\t %lu\n", run_par.array_size);
-    printf("  record payload:\t %lu\n", run_par.record_payload_size);
-    printf("  number of FastFlow threads:\t %d\n", run_par.ff_num_threads);
+    fprintf(stderr, "RunningParams:\n");
+    fprintf(stderr, "  array size:\t\t\t%lu\n", run_par.array_size);
+    fprintf(stderr, "  record payload:\t\t%lu\n", run_par.record_payload_size);
+    fprintf(stderr, "  number of FastFlow threads:\t%d\n", run_par.ff_num_threads);
 }
+
 
 #endif //CMDLINE_PARAM_PARSER_H
