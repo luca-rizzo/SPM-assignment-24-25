@@ -5,16 +5,16 @@
 
 using namespace std;
 
-inline bool check_sort(const vector<reference_wrapper<Record> > &sorted) {
+inline bool check_sort(const vector<Record> &sorted) {
     for (size_t i = 1; i < sorted.size(); ++i) {
-        if (sorted[i - 1].get().key > sorted[i].get().key) {
+        if (sorted[i - 1].key > sorted[i].key) {
             return false;
         }
     }
     return true;
 }
 
-inline void print_sort_res(const vector<reference_wrapper<Record> > &sorted) {
+inline void print_sort_res(const vector<Record> &sorted) {
     if (check_sort(sorted)) {
         cout << "Sorting succeeded" << endl;
     } else {
