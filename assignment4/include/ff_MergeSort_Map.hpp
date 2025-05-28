@@ -7,7 +7,6 @@
 #include <deque>
 #include <ff/ff.hpp>
 #include <ff/farm.hpp>
-#include <iostream>
 #include <algorithm>
 
 using namespace ff;
@@ -24,12 +23,14 @@ struct Task {
 
 template<typename T>
 struct Worker : ff_minode_t<Task> {
-    Worker(T* data, size_t len) : data(data), len(len) {}
+    Worker(T *data, size_t len) : data(data), len(len) {
+    }
 
-    Task* svc(Task* in) override {
+    Task *svc(Task *in) override {
         if (in->type == TaskType::SORT) {
             std::sort(data + in->start, data + in->end + 1);
-        } else { // MERGE
+        } else {
+            // MERGE
             if (data[in->middle] <= data[in->middle + 1])
                 return in;
             std::inplace_merge(data + in->start,
@@ -39,28 +40,32 @@ struct Worker : ff_minode_t<Task> {
         return in;
     }
 
-    T* data;
+    T *data;
     size_t len;
 };
 
 template<typename T>
 struct Master : ff_monode_t<Task> {
-    Master(T* data, size_t len, int _par_degree, size_t _base_case_size)
+    Master(T *data, size_t len, int _par_degree, size_t _base_case_size)
         : data(data),
           len(len),
           num_workers(_par_degree - 1),
-          par_degree(_par_degree)
-    {
-        base_case_size = (_base_case_size == 0) ? ceil(static_cast<double>(len) / par_degree) : _base_case_size;
+          par_degree(_par_degree) {
+        base_case_size = (_base_case_size == 0)
+                             ? (len + par_degree - 1) / par_degree
+                             : _base_case_size;
+
         size_t leaf_tasks = (len + base_case_size - 1) / base_case_size;
         reusable_tasks.resize(leaf_tasks * 2);
     }
 
-    Task* create_and_send_merge_task(int idx) {
-        Task* l = current_level_merge.front(); current_level_merge.pop_front();
-        Task* r = current_level_merge.front(); current_level_merge.pop_front();
+    Task *create_and_send_merge_task(int idx) {
+        Task *l = current_level_merge.front();
+        current_level_merge.pop_front();
+        Task *r = current_level_merge.front();
+        current_level_merge.pop_front();
 
-        Task& t = reusable_tasks[idx];
+        Task &t = reusable_tasks[idx];
         t.type = TaskType::MERGE;
         t.start = l->start;
         t.middle = l->end;
@@ -77,12 +82,12 @@ struct Master : ff_monode_t<Task> {
         }
     }
 
-    Task* svc(Task* in) override {
+    Task *svc(Task *in) override {
         if (in == nullptr) {
             size_t i = 0;
             for (; i + base_case_size < len; i += base_case_size) {
                 size_t end = i + base_case_size - 1;
-                Task& t = reusable_tasks[level_merges_expected];
+                Task &t = reusable_tasks[level_merges_expected];
                 t.type = TaskType::SORT;
                 t.start = i;
                 t.end = end;
@@ -91,7 +96,7 @@ struct Master : ff_monode_t<Task> {
                 level_merges_expected++;
             }
 
-            Task& emitter_base_case = reusable_tasks[level_merges_expected];
+            Task &emitter_base_case = reusable_tasks[level_merges_expected];
             emitter_base_case.type = TaskType::SORT;
             emitter_base_case.start = i;
             emitter_base_case.end = len - 1;
@@ -101,38 +106,45 @@ struct Master : ff_monode_t<Task> {
         }
 
         level_merges_completed++;
+
         if (level_merges_completed == level_merges_expected) {
+            level_merges_expected = 0;
+            level_merges_completed = 0;
+
+            // Final merge of last two sorted blocks
             if (current_level_merge.size() == 2) {
-                Task* l = current_level_merge.front(); current_level_merge.pop_front();
-                Task* r = current_level_merge.front(); current_level_merge.pop_front();
+                Task *l = current_level_merge.front();
+                current_level_merge.pop_front();
+                Task *r = current_level_merge.front();
+                current_level_merge.pop_front();
                 std::inplace_merge(data + l->start,
                                    data + l->end + 1,
                                    data + r->end + 1);
                 return EOS;
             }
 
-            deque<Task*> nextLevel;
-            level_merges_expected = 0;
-
-            while (current_level_merge.size() > 1) {
-                Task* task = create_and_send_merge_task(level_merges_expected);
-                nextLevel.push_back(task);
+            // create and send merge task
+            size_t to_merge = current_level_merge.size();
+            for (size_t i = 0; i + 1 < to_merge; i += 2) {
+                Task *merged = create_and_send_merge_task(level_merges_expected);
+                current_level_merge.push_back(merged);
                 level_merges_expected++;
             }
 
+            // If a task remains unpaired it is put back in deque
+            if (to_merge % 2 != 0) {
+                Task *leftover = current_level_merge.front();
+                current_level_merge.pop_front();
+                current_level_merge.push_back(leftover);
+            }
+            //at the end of a level we can terminate all the useless workers
             terminate_useless_worker();
-
-            if (!current_level_merge.empty())
-                nextLevel.push_back(current_level_merge.front());
-
-            current_level_merge = std::move(nextLevel);
-            level_merges_completed = 0;
         }
 
         return GO_ON;
     }
 
-    T* data;
+    T *data;
     size_t len;
     int num_workers;
     int par_degree;
@@ -140,22 +152,21 @@ struct Master : ff_monode_t<Task> {
     int level_merges_expected = 0;
     int level_merges_completed = 0;
     vector<Task> reusable_tasks;
-    deque<Task*> current_level_merge;
+    deque<Task *> current_level_merge;
 };
 
 template<typename T>
 class ff_MergeSort_Map : public ff_Farm<void> {
 public:
-    ff_MergeSort_Map(T* data, size_t len, int par_degree, int base_case_size = 0)
+    ff_MergeSort_Map(T *data, size_t len, int par_degree, int base_case_size = 0)
         : ff_Farm(
-              [&]() {
-                  vector<unique_ptr<ff_node>> W;
-                  for (int i = 0; i < par_degree - 1; ++i)
-                      W.push_back(make_unique<Worker<T>>(data, len));
-                  return W;
-              }(),
-              make_unique<Master<T>>(data, len, par_degree, base_case_size))
-    {
+            [&]() {
+                vector<unique_ptr<ff_node> > W;
+                for (int i = 0; i < par_degree - 1; ++i)
+                    W.push_back(make_unique<Worker<T> >(data, len));
+                return W;
+            }(),
+            make_unique<Master<T> >(data, len, par_degree, base_case_size)) {
         this->remove_collector();
         this->wrap_around();
     }
