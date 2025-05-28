@@ -7,6 +7,8 @@
 #include <deque>
 #include <ff/ff.hpp>
 #include <ff/farm.hpp>
+#include <iostream>
+
 #include <algorithm>
 
 using namespace ff;
@@ -43,11 +45,12 @@ struct Worker : ff_minode_t<Task> {
 
 template<totally_ordered T>
 struct Master : ff_monode_t<Task> {
-    Master(vector<T>& to_sort, int par_degree, size_t _base_case_size)
+    Master(vector<T>& to_sort, int _par_degree, size_t _base_case_size)
         : to_sort(to_sort),
-          num_workers(par_degree),
-          base_case_size(_base_case_size == 0 ? ceil((double)to_sort.size() / par_degree) : _base_case_size)
+          num_workers(_par_degree - 1),
+          par_degree(_par_degree)
     {
+        base_case_size = _base_case_size == 0 ? ceil(static_cast<double>(to_sort.size()) / _par_degree) : _base_case_size;
         size_t leaf_tasks = (to_sort.size() + base_case_size - 1) / base_case_size;
         reusable_tasks.resize(leaf_tasks * 2);
     }
@@ -76,24 +79,37 @@ struct Master : ff_monode_t<Task> {
     Task* svc(Task* in) override {
         if (in == nullptr) {
             size_t n = to_sort.size();
-            for (size_t i = 0; i < n; i += base_case_size) {
-                size_t end = min(n - 1, i + base_case_size - 1);
+            size_t i = 0;
+            for (; i + base_case_size < n; i += base_case_size) {
+                size_t end = i + base_case_size - 1;
                 Task& t = reusable_tasks[level_merges_expected];
                 t.type = TaskType::SORT;
                 t.start = i;
                 t.end = end;
-                t.middle = 0; // ignorato per SORT
                 ff_send_out(&t);
                 current_level_merge.push_back(&t);
                 level_merges_expected++;
             }
+
+            Task& emitter_base_case = reusable_tasks[level_merges_expected];
+            emitter_base_case.type = TaskType::SORT;
+            emitter_base_case.start = i;
+            emitter_base_case.end = n - 1;
+            std::sort(to_sort.begin() + emitter_base_case.start, to_sort.begin() + emitter_base_case.end + 1);
+            current_level_merge.push_back(&emitter_base_case);
             return GO_ON;
         }
 
         level_merges_completed++;
         if (level_merges_completed == level_merges_expected) {
-            if (current_level_merge.size() == 1)
+            if (current_level_merge.size() == 2) {
+                Task* l = current_level_merge.front(); current_level_merge.pop_front();
+                Task* r = current_level_merge.front(); current_level_merge.pop_front();
+                std::inplace_merge(to_sort.begin() + l -> start,
+                               to_sort.begin() + l -> end + 1,
+                               to_sort.begin() + r -> end + 1);
                 return EOS;
+            }
 
             deque<Task*> nextLevel;
             level_merges_expected = 0;
@@ -118,6 +134,7 @@ struct Master : ff_monode_t<Task> {
 
     vector<T>& to_sort;
     int num_workers;
+    int par_degree;
     size_t base_case_size;
     int level_merges_expected = 0;
     int level_merges_completed = 0;
@@ -128,15 +145,15 @@ struct Master : ff_monode_t<Task> {
 template<totally_ordered T>
 class ff_MergeSort_Map : public ff_Farm<void> {
 public:
-    ff_MergeSort_Map(vector<T>& to_sort, int num_workers, int base_case_size = 0)
+    ff_MergeSort_Map(vector<T>& to_sort, int par_degree, int base_case_size = 0)
         : ff_Farm(
               [&]() {
                   vector<unique_ptr<ff_node>> W;
-                  for (int i = 0; i < num_workers; ++i)
+                  for (int i = 0; i < par_degree - 1; ++i)
                       W.push_back(make_unique<Worker<T>>(to_sort));
                   return W;
               }(),
-              make_unique<Master<T>>(to_sort, num_workers, base_case_size))
+              make_unique<Master<T>>(to_sort, par_degree, base_case_size))
     {
         this->remove_collector();
         this->wrap_around();
