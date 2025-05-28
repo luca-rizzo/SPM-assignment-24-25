@@ -8,7 +8,7 @@ using namespace std;
 
 struct Record {
     unsigned long key;
-    std::vector<char> payload;
+    char* payload;
 
     bool operator<(const Record& other) const {
         return key < other.key;
@@ -38,62 +38,13 @@ inline vector<Record> generate_input_array(size_t N, size_t payload_size) {
     vector<Record> records(N);
     for (size_t i = 0; i < N; ++i) {
         records[i].key = key_dist(rng);
-        records[i].payload.resize(payload_size);
+        records[i].payload = new char[payload_size];
         for (size_t j = 0; j < payload_size; ++j) {
             records[i].payload[j] = char_dist(rng);
         }
     }
 
     return records;
-}
-struct KeyIndex {
-    unsigned long key;
-    unsigned long original_index;
-
-    bool operator==(const KeyIndex& other) const {
-        return key == other.key;
-    }
-
-    bool operator!=(const KeyIndex& other) const {
-        return key != other.key;
-    }
-
-    bool operator<(const KeyIndex& other) const {
-        return key < other.key;
-    }
-
-    bool operator<=(const KeyIndex& other) const {
-        return key <= other.key;
-    }
-
-    bool operator>(const KeyIndex& other) const {
-        return key > other.key;
-    }
-
-    bool operator>=(const KeyIndex& other) const {
-        return key >= other.key;
-    }
-};
-
-inline void generate_input_array_to_distribute(size_t N, size_t payload_size,
-                                               vector<KeyIndex>& keys,
-                                               vector<vector<char>>& payloads) {
-    mt19937 rng(42);
-    uniform_int_distribution<unsigned long> key_dist(1, 100000);
-    uniform_int_distribution<char> char_dist('A', 'Z');
-
-    keys.resize(N);
-    payloads.resize(N);
-
-    for (size_t i = 0; i < N; ++i) {
-        unsigned long key = key_dist(rng);
-        keys[i] = KeyIndex(key, i); // `i` is the index of the payload
-
-        payloads[i].resize(payload_size);
-        for (size_t j = 0; j < payload_size; ++j) {
-            payloads[i][j] = char_dist(rng);
-        }
-    }
 }
 
 #endif //GENERATE_INPUT_ARRAY_H

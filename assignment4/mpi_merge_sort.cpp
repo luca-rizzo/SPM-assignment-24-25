@@ -28,7 +28,7 @@ int get_number_of_nodes() {
     return largest_power_of_two(number_of_nodes);
 }
 
-void merge_sorted_inplace_tail_expand(vector<KeyIndex> &v1, const vector<KeyIndex> &v2) {
+void merge_sorted_inplace_tail_expand(vector<Record> &v1, const vector<Record> &v2) {
     size_t n1 = v1.size();
     size_t n2 = v2.size();
     v1.resize(n1 + n2); // expand v1 to hold the full result
@@ -79,8 +79,8 @@ bool check_sort(const vector<T> &sorted) {
     return true;
 }
 
-vector<KeyIndex> scatter_base_case(int number_of_nodes, MPI_Comm ACTIVE_COMM, RunningParam running_param,
-                                   const vector<KeyIndex> &keys, MPI_Datatype MPI_KEY_INDEX) {
+vector<Record> scatter_base_case(int number_of_nodes, MPI_Comm ACTIVE_COMM, RunningParam running_param,
+                                   const vector<Record> &records, MPI_Datatype MPI_RECORD_TYPE) {
     int rank;
     MPI_Comm_rank(ACTIVE_COMM, &rank);
     auto chunk_size = static_cast<size_t>(
@@ -97,18 +97,40 @@ vector<KeyIndex> scatter_base_case(int number_of_nodes, MPI_Comm ACTIVE_COMM, Ru
         displs[i] = start;
     }
 
-    vector<KeyIndex> base_case(sendcounts[rank]);
+    vector<Record> base_case(sendcounts[rank]);
+    if(rank == 0) {
+        double t_stop = MPI_Wtime();
 
-    MPI_Scatterv(keys.data(), sendcounts.data(), displs.data(), MPI_KEY_INDEX,
-                 base_case.data(), sendcounts[rank], MPI_KEY_INDEX, 0, ACTIVE_COMM);
+    }
+    double t_start = 0;
+    if (rank == 0) {
+        t_start = MPI_Wtime();
+
+    }
+
+    MPI_Scatterv(records.data(), sendcounts.data(), displs.data(), MPI_RECORD_TYPE,
+                 base_case.data(), sendcounts[rank], MPI_RECORD_TYPE, 0, ACTIVE_COMM);
+
+    if(rank == 0) {
+        double t_stop = MPI_Wtime();
+        cout << "SCATTER: " << t_stop - t_start << endl;
+    }
     return base_case;
 }
 
-MPI_Datatype create_mpi_keyindex_type_contiguous() {
-    MPI_Datatype MPI_KEY_INDEX;
-    MPI_Type_contiguous(2, MPI_UNSIGNED_LONG, &MPI_KEY_INDEX);
-    MPI_Type_commit(&MPI_KEY_INDEX);
-    return MPI_KEY_INDEX;
+MPI_Datatype create_mpi_record_type() {
+    MPI_Datatype MPI_RECORD;
+    const int count = 2;
+    int blocklengths[2] = {1, 1};
+    MPI_Datatype types[2] = {MPI_UNSIGNED_LONG, MPI_UINT64_T};
+
+    MPI_Aint offsets[2];
+    offsets[0] = offsetof(Record, key);
+    offsets[1] = offsetof(Record, payload);  //treat address as an integer
+
+    MPI_Type_create_struct(count, blocklengths, offsets, types, &MPI_RECORD);
+    MPI_Type_commit(&MPI_RECORD);
+    return MPI_RECORD;
 }
 
 int get_my_sender_at_level(int rank, int level) {
@@ -119,20 +141,63 @@ int get_my_receiver_at_level(int rank, int level) {
     return rank - (1 << level);
 }
 
-vector<KeyIndex> sort_base_case(const RunningParam &running_param, vector<KeyIndex> &base_case) {
-    vector<reference_wrapper<KeyIndex> > refs(base_case.begin(), base_case.end());
-
+void sort_base_case(const RunningParam &running_param, vector<Record> &base_case) {
     // create a map
-    ff_MergeSort_Map farm(refs, running_param.ff_num_threads - 1);
+    ff_MergeSort_Map farm(base_case, running_param.ff_num_threads);
 
     if (farm.run_and_wait_end() < 0) {
         error("running the farm\n");
     }
-    return vector<KeyIndex>{refs.begin(), refs.end()};
+}
+
+bool check_records_match(const std::vector<Record>& original,
+                                      const std::vector<Record>& sorted,
+                                      size_t payload_size) {
+    if (original.size() != sorted.size()) {
+        std::cerr << "Size mismatch: original.size() = " << original.size()
+                  << ", sorted.size() = " << sorted.size() << "\n";
+        return false;
+    }
+
+    std::vector<bool> matched(original.size(), false);
+
+    for (size_t i = 0; i < sorted.size(); ++i) {
+        const Record& sr = sorted[i];
+        bool found = false;
+
+        for (size_t j = 0; j < original.size(); ++j) {
+            if (matched[j]) continue;
+
+            const Record& orr = original[j];
+            if (sr.key != orr.key) continue;
+
+            bool equal = true;
+            for (size_t k = 0; k < payload_size; ++k) {
+                if (sr.payload[k] != orr.payload[k]) {
+                    equal = false;
+                    break;
+                }
+            }
+
+            if (equal) {
+                matched[j] = true;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            std::cerr << "No matching record found for sorted[" << i << "] key = "
+                      << sr.key << "\n";
+            return false;
+        }
+    }
+
+    return true;
 }
 
 void wait_data_current_level(const MPI_Datatype &MPI_KEY_INDEX,
-                             vector<KeyIndex> &current_level_received,
+                             vector<Record> &current_level_received,
                              MPI_Request &current_request) {
     MPI_Status status;
     MPI_Wait(&current_request, &status);
@@ -142,7 +207,19 @@ void wait_data_current_level(const MPI_Datatype &MPI_KEY_INDEX,
 }
 
 int main(int argc, char **argv) {
-    MPI_Init(&argc, &argv);
+    int provided;
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
+    if (provided < MPI_THREAD_FUNNELED) {
+        std::printf("MPI does not provide required threading support\n");
+        MPI_Abort(MPI_COMM_WORLD, 1);
+        std::abort();
+    }
+    int is_main_flag;
+    MPI_Is_thread_main(&is_main_flag);
+    if (!is_main_flag) {
+        std::printf("This thread called MPI_Init_thread but it is not the main thread\n");
+        MPI_Abort(MPI_COMM_WORLD, -1);
+    }
     int rank = get_my_rank(MPI_COMM_WORLD);
     int number_of_nodes = get_number_of_nodes();
     MPI_Comm ACTIVE_COMM;
@@ -155,41 +232,39 @@ int main(int argc, char **argv) {
     }
     rank = get_my_rank(ACTIVE_COMM);
     RunningParam running_param = parseCommandLine(argc, argv);
-    vector<KeyIndex> keys;
-    vector<vector<char> > payloads;
-
+    vector<Record> records;
     if (rank == 0) {
-        generate_input_array_to_distribute(running_param.array_size,
-                                           running_param.record_payload_size, keys, payloads);
+        records = generate_input_array(running_param.array_size,
+                                           running_param.record_payload_size);
     }
-    MPI_Datatype MPI_KEY_INDEX = create_mpi_keyindex_type_contiguous();
+    MPI_Datatype MPI_RECORD_TYPE = create_mpi_record_type();
     MPI_Barrier(ACTIVE_COMM);
     if (rank == 0) {
         cout << "STARTED" << endl;
     }
     double t_start = MPI_Wtime();
-    vector<KeyIndex> base_case = scatter_base_case(
-        number_of_nodes, ACTIVE_COMM, running_param, keys, MPI_KEY_INDEX);
-    size_t sub_array_level_size = base_case.size();
+    vector<Record> sorted_block = scatter_base_case(
+        number_of_nodes, ACTIVE_COMM, running_param, records, MPI_RECORD_TYPE);
+    size_t sub_array_level_size = sorted_block.size();
     int max_level = log2(number_of_nodes);
     int level = 0;
-    vector<KeyIndex> current_level_recevied(sub_array_level_size);
-    vector<KeyIndex> next_level_received(sub_array_level_size * 2);
+    vector<Record> current_level_received(sub_array_level_size);
+    vector<Record> next_level_received(sub_array_level_size * 2);
     MPI_Request current_request, next_request;
 
     // Post the initial Irecv for merge at level 0
     if (am_i_receiver(rank, level, max_level)) {
         int sender = get_my_sender_at_level(rank, level);
-        MPI_Irecv(current_level_recevied.data(), sub_array_level_size, MPI_KEY_INDEX,
+        MPI_Irecv(current_level_received.data(), sub_array_level_size, MPI_RECORD_TYPE,
                   sender, 0, ACTIVE_COMM, &current_request);
     }
 
     // Sort the local base case in parallel with the initial Irecv
-    vector<KeyIndex> sorted_block = sort_base_case(running_param, base_case);
+    sort_base_case(running_param, sorted_block);
     while (level < max_level) {
         if (am_i_sender(rank, level, max_level)) {
             int receiver = get_my_receiver_at_level(rank, level);
-            MPI_Send(sorted_block.data(), sub_array_level_size, MPI_KEY_INDEX,
+            MPI_Send(sorted_block.data(), sub_array_level_size, MPI_RECORD_TYPE,
                      receiver, 0, ACTIVE_COMM);
             break; // A sender no longer participates in future merge steps
         }
@@ -198,19 +273,19 @@ int main(int argc, char **argv) {
             if (am_i_receiver(rank, level + 1, max_level)) {
                 next_level_received.resize(2 * sub_array_level_size);
                 int sender = get_my_sender_at_level(rank, level + 1);
-                MPI_Irecv(next_level_received.data(), 2 * sub_array_level_size, MPI_KEY_INDEX,
+                MPI_Irecv(next_level_received.data(), 2 * sub_array_level_size, MPI_RECORD_TYPE,
                           sender, 0, ACTIVE_COMM, &next_request);
             }
 
             // Complete the current level's receive
-            wait_data_current_level(MPI_KEY_INDEX, current_level_recevied, current_request);
+            wait_data_current_level(MPI_RECORD_TYPE, current_level_received, current_request);
 
             // Merge the received block with the current sorted block
-            merge_sorted_inplace_tail_expand(sorted_block, current_level_recevied);
+            merge_sorted_inplace_tail_expand(sorted_block, current_level_received);
             sub_array_level_size = sorted_block.size();
 
             // Swap buffers and request for the next iteration
-            swap(current_level_recevied, next_level_received);
+            swap(current_level_received, next_level_received);
             swap(current_request, next_request);
         }
         level++;
@@ -220,8 +295,9 @@ int main(int argc, char **argv) {
         double t_stop = MPI_Wtime();
         cout << "# elapsed time (mpi_merge_sort): "
                 << (t_stop - t_start) << "s" << endl;
-        cout << "Sorted: " << (check_sort(sorted_block) && sorted_block.size() == keys.size()) << endl;
+        cout << "Sorted: " << check_sort(sorted_block) << endl;
+        //cout << "All records payload match: " << check_records_match(records, sorted_block, running_param.record_payload_size) <<endl;
     }
-    MPI_Type_free(&MPI_KEY_INDEX);
+    MPI_Type_free(&MPI_RECORD_TYPE);
     MPI_Finalize();
 }

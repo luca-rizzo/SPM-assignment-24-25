@@ -33,7 +33,7 @@ TARGET               = seq_merge_sort mpi_merge_sort ff_merge_sort
 	$(CC) $(INCLUDES) $(CFLAGS) -c -o $@ $<
 
 mpi_merge_sort: mpi_merge_sort.cpp ./include/ff_MergeSort_Map.hpp
-	$(CXX_MPI) $(INCLUDES) $(CXXFLAGS) $(OPTFLAGS) -o $@ $< $(LIBS)
+	$(CXX_MPI) $(INCLUDES) $(CXXFLAGS)  $(OPTIMIZE_FLAGS) -o $@ $< $(LIBS)
 
 ff_merge_sort: ff_merge_sort.cpp ./include/ff_MergeSort_Map.hpp
 	$(CXX) $(INCLUDES) $(CXXFLAGS) $(OPTIMIZE_FLAGS) -o $@ $< $(LDFLAGS) $(LIBS)
