@@ -79,16 +79,19 @@ bool check_sort(const vector<T> &sorted) {
     return true;
 }
 
-vector<Record> scatter_base_case(int number_of_nodes, MPI_Comm ACTIVE_COMM, RunningParam running_param,
-                                   const vector<Record> &records, MPI_Datatype MPI_RECORD_TYPE) {
+void scatter_base_case(int number_of_nodes, MPI_Comm ACTIVE_COMM, RunningParam running_param,
+                       const vector<Record> &records, vector<int> &displs,
+                       vector<int> &sendcounts, vector<Record> &sorted_records,
+                       MPI_Datatype MPI_RECORD_TYPE) {
+
     int rank;
     MPI_Comm_rank(ACTIVE_COMM, &rank);
     auto chunk_size = static_cast<size_t>(
         ceil(static_cast<double>(running_param.array_size) / number_of_nodes)
     );
 
-    vector<int> sendcounts(number_of_nodes);
-    vector<int> displs(number_of_nodes);
+    sendcounts.resize(number_of_nodes);
+    displs.resize(number_of_nodes);
 
     for (int i = 0; i < number_of_nodes; ++i) {
         int start = i * chunk_size;
@@ -97,25 +100,8 @@ vector<Record> scatter_base_case(int number_of_nodes, MPI_Comm ACTIVE_COMM, Runn
         displs[i] = start;
     }
 
-    vector<Record> base_case(sendcounts[rank]);
-    if(rank == 0) {
-        double t_stop = MPI_Wtime();
-
-    }
-    double t_start = 0;
-    if (rank == 0) {
-        t_start = MPI_Wtime();
-
-    }
-
     MPI_Scatterv(records.data(), sendcounts.data(), displs.data(), MPI_RECORD_TYPE,
-                 base_case.data(), sendcounts[rank], MPI_RECORD_TYPE, 0, ACTIVE_COMM);
-
-    if(rank == 0) {
-        double t_stop = MPI_Wtime();
-        cout << "SCATTER: " << t_stop - t_start << endl;
-    }
-    return base_case;
+                 sorted_records.data() + displs[rank], sendcounts[rank], MPI_RECORD_TYPE, 0, ACTIVE_COMM);
 }
 
 MPI_Datatype create_mpi_record_type() {
@@ -126,12 +112,13 @@ MPI_Datatype create_mpi_record_type() {
 
     MPI_Aint offsets[2];
     offsets[0] = offsetof(Record, key);
-    offsets[1] = offsetof(Record, payload);  //treat address as an integer
+    offsets[1] = offsetof(Record, payload); //treat address as an integer
 
     MPI_Type_create_struct(count, blocklengths, offsets, types, &MPI_RECORD);
     MPI_Type_commit(&MPI_RECORD);
     return MPI_RECORD;
 }
+
 
 int get_my_sender_at_level(int rank, int level) {
     return rank + (1 << level);
@@ -141,34 +128,48 @@ int get_my_receiver_at_level(int rank, int level) {
     return rank - (1 << level);
 }
 
-void sort_base_case(const RunningParam &running_param, vector<Record> &base_case) {
+vector<int> get_my_sender_at_all_level(int rank, int max_level) {
+    vector<int> senders;
+    for (int level = 0; level < max_level; ++level) {
+        if (am_i_receiver(rank, level, max_level)) {
+            int sender_at_level = get_my_sender_at_level(rank, level);
+            senders.push_back(sender_at_level);
+        }
+    }
+    return senders;
+}
+
+
+void sort_base_case(const RunningParam &running_param, vector<Record> &base_case,
+                    int my_displ,
+                    int my_send_count) {
     // create a map
-    ff_MergeSort_Map farm(base_case, running_param.ff_num_threads);
+    ff_MergeSort_Map farm(base_case.data() + my_displ, my_send_count, running_param.ff_num_threads);
 
     if (farm.run_and_wait_end() < 0) {
         error("running the farm\n");
     }
 }
 
-bool check_records_match(const std::vector<Record>& original,
-                                      const std::vector<Record>& sorted,
-                                      size_t payload_size) {
+bool check_records_match(const std::vector<Record> &original,
+                         const std::vector<Record> &sorted,
+                         size_t payload_size) {
     if (original.size() != sorted.size()) {
         std::cerr << "Size mismatch: original.size() = " << original.size()
-                  << ", sorted.size() = " << sorted.size() << "\n";
+                << ", sorted.size() = " << sorted.size() << "\n";
         return false;
     }
 
     std::vector<bool> matched(original.size(), false);
 
     for (size_t i = 0; i < sorted.size(); ++i) {
-        const Record& sr = sorted[i];
+        const Record &sr = sorted[i];
         bool found = false;
 
         for (size_t j = 0; j < original.size(); ++j) {
             if (matched[j]) continue;
 
-            const Record& orr = original[j];
+            const Record &orr = original[j];
             if (sr.key != orr.key) continue;
 
             bool equal = true;
@@ -188,7 +189,7 @@ bool check_records_match(const std::vector<Record>& original,
 
         if (!found) {
             std::cerr << "No matching record found for sorted[" << i << "] key = "
-                      << sr.key << "\n";
+                    << sr.key << "\n";
             return false;
         }
     }
@@ -235,58 +236,51 @@ int main(int argc, char **argv) {
     vector<Record> records;
     if (rank == 0) {
         records = generate_input_array(running_param.array_size,
-                                           running_param.record_payload_size);
+                                       running_param.record_payload_size);
     }
+    vector<Record> sorted_records(running_param.array_size);
     MPI_Datatype MPI_RECORD_TYPE = create_mpi_record_type();
     MPI_Barrier(ACTIVE_COMM);
     if (rank == 0) {
         cout << "STARTED" << endl;
     }
     double t_start = MPI_Wtime();
-    vector<Record> sorted_block = scatter_base_case(
-        number_of_nodes, ACTIVE_COMM, running_param, records, MPI_RECORD_TYPE);
-    size_t sub_array_level_size = sorted_block.size();
+    vector<int> displs;
+    vector<int> sendcounts;
+    scatter_base_case(
+        number_of_nodes, ACTIVE_COMM, running_param, records, displs, sendcounts, sorted_records, MPI_RECORD_TYPE);
     int max_level = log2(number_of_nodes);
     int level = 0;
-    vector<Record> current_level_received(sub_array_level_size);
-    vector<Record> next_level_received(sub_array_level_size * 2);
-    MPI_Request current_request, next_request;
-
-    // Post the initial Irecv for merge at level 0
-    if (am_i_receiver(rank, level, max_level)) {
-        int sender = get_my_sender_at_level(rank, level);
-        MPI_Irecv(current_level_received.data(), sub_array_level_size, MPI_RECORD_TYPE,
-                  sender, 0, ACTIVE_COMM, &current_request);
+    vector<int> my_senders = get_my_sender_at_all_level(rank, max_level);
+    vector<MPI_Request> requests(my_senders.size());
+    int base_case = sendcounts[0];
+    for (size_t level = 0; level < my_senders.size(); ++level) {
+        int sender_at_level = my_senders[level];
+        size_t start_receive = displs[sender_at_level];
+        size_t max_num_elem_level = base_case * (1 << level);
+        MPI_Irecv(sorted_records.data() + start_receive, max_num_elem_level, MPI_RECORD_TYPE,
+                  my_senders[level], 0, ACTIVE_COMM, &requests[level]);
     }
-
-    // Sort the local base case in parallel with the initial Irecv
-    sort_base_case(running_param, sorted_block);
+    // Sort the local base case in parallel with the Irecv
+    sort_base_case(running_param, sorted_records, displs[rank], sendcounts[rank]);
+    size_t current_elem_sorted = sendcounts[rank];
     while (level < max_level) {
         if (am_i_sender(rank, level, max_level)) {
             int receiver = get_my_receiver_at_level(rank, level);
-            MPI_Send(sorted_block.data(), sub_array_level_size, MPI_RECORD_TYPE,
+            MPI_Send(sorted_records.data() + rank * base_case, current_elem_sorted,
+                MPI_RECORD_TYPE,
                      receiver, 0, ACTIVE_COMM);
             break; // A sender no longer participates in future merge steps
         }
         if (am_i_receiver(rank, level, max_level)) {
-            // Pre-post the Irecv for the next level if needed
-            if (am_i_receiver(rank, level + 1, max_level)) {
-                next_level_received.resize(2 * sub_array_level_size);
-                int sender = get_my_sender_at_level(rank, level + 1);
-                MPI_Irecv(next_level_received.data(), 2 * sub_array_level_size, MPI_RECORD_TYPE,
-                          sender, 0, ACTIVE_COMM, &next_request);
-            }
-
-            // Complete the current level's receive
-            wait_data_current_level(MPI_RECORD_TYPE, current_level_received, current_request);
-
-            // Merge the received block with the current sorted block
-            merge_sorted_inplace_tail_expand(sorted_block, current_level_received);
-            sub_array_level_size = sorted_block.size();
-
-            // Swap buffers and request for the next iteration
-            swap(current_level_received, next_level_received);
-            swap(current_request, next_request);
+            MPI_Status status;
+            MPI_Wait(&requests[level], &status);
+            int real_received_count;
+            MPI_Get_count(&status, MPI_RECORD_TYPE, &real_received_count);
+            std::inplace_merge(sorted_records.data() + displs[rank],
+                               sorted_records.data() + displs[rank] + current_elem_sorted,
+                               sorted_records.data() + displs[rank] + current_elem_sorted + real_received_count);
+            current_elem_sorted += real_received_count;
         }
         level++;
     }
@@ -295,7 +289,7 @@ int main(int argc, char **argv) {
         double t_stop = MPI_Wtime();
         cout << "# elapsed time (mpi_merge_sort): "
                 << (t_stop - t_start) << "s" << endl;
-        cout << "Sorted: " << check_sort(sorted_block) << endl;
+        cout << "Sorted: " << check_sort(sorted_records) << endl;
         //cout << "All records payload match: " << check_records_match(records, sorted_block, running_param.record_payload_size) <<endl;
     }
     MPI_Type_free(&MPI_RECORD_TYPE);
