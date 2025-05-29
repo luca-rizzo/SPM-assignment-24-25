@@ -11,7 +11,7 @@
 
 using namespace std;
 
-int get_my_rank(const MPI_Comm& COMM) {
+int get_my_rank(const MPI_Comm &COMM) {
     int rank;
     MPI_Comm_rank(COMM, &rank);
     return rank;
@@ -26,7 +26,7 @@ int largest_power_of_two(const int n) {
 int get_number_of_nodes() {
     int number_of_nodes;
     MPI_Comm_size(MPI_COMM_WORLD, &number_of_nodes);
-    return largest_power_of_two(number_of_nodes);
+    return number_of_nodes;
 }
 
 bool am_i_receiver(int rank, int level, int max_level) {
@@ -42,22 +42,21 @@ bool am_i_sender(int rank, int level, int max_level) {
     return (rank % group_size) == (1 << level);
 }
 
-void scatter_base_case(int number_of_nodes, MPI_Comm ACTIVE_COMM, RunningParam running_param,
+void scatter_base_case(int number_of_nodes, const MPI_Comm &ACTIVE_COMM, int number_of_records,
                        const vector<Record> &records, vector<int> &displs,
                        vector<int> &sendcounts, vector<Record> &sorted_records,
                        MPI_Datatype MPI_RECORD_TYPE) {
     int rank;
     MPI_Comm_rank(ACTIVE_COMM, &rank);
-    auto chunk_size = static_cast<size_t>(
-        ceil(static_cast<double>(running_param.array_size) / number_of_nodes)
-    );
+    int chunk_size = (number_of_records + number_of_nodes - 1) / number_of_nodes;
+
 
     sendcounts.resize(number_of_nodes);
     displs.resize(number_of_nodes);
 
     for (int i = 0; i < number_of_nodes; ++i) {
         int start = i * chunk_size;
-        int end = min(start + chunk_size, running_param.array_size);
+        int end = min(start + chunk_size, number_of_records);
         sendcounts[i] = end - start;
         displs[i] = start;
     }
@@ -112,49 +111,95 @@ void sort_base_case(const RunningParam &running_param,
     }
 }
 
-void wait_data_current_level(const MPI_Datatype &MPI_KEY_INDEX,
-                             vector<Record> &current_level_received,
-                             MPI_Request &current_request) {
-    MPI_Status status;
-    MPI_Wait(&current_request, &status);
-    int real_received_count;
-    MPI_Get_count(&status, MPI_KEY_INDEX, &real_received_count);
-    current_level_received.resize(real_received_count);
+// Ensure that array_size is safe for all MPI operations that rely on `int` counts.
+//
+// MPI functions such as MPI_Scatterv, MPI_Send, and MPI_Recv use `int` parameters
+// to specify the number of elements to send or receive. This includes:
+//   - MPI_Scatterv: all values in `sendcounts[]` and `displs[]` must be ≤ INT_MAX.
+//   - MPI_Send / MPI_Recv: maximum message size must be ≤ INT_MAX elements and in
+//      merge steps, at the highest level, a process may receive and send up to half of the array.
+//
+// This check ensures that no part of the distributed computation (from initial
+// scatter to final merge) attempts to send or receive more elements than MPI can handle.
+int check_on_array_size(int rank, RunningParam running_param) {
+    if (running_param.array_size > static_cast<size_t>(numeric_limits<int>::max())) {
+        if (rank == 0) {
+            fprintf(stderr,
+                    "Error: array_size (%zu) is too large — may exceed MPI count limits (max allowed: %d)\n",
+                    running_param.array_size, numeric_limits<int>::max()
+            );
+        }
+        MPI_Finalize();
+        throw overflow_error("array_size too large: may exceed MPI count limits during Scatterv and final merge");
+    }
+    return static_cast<int>(running_param.array_size);
 }
 
-int main(int argc, char **argv) {
+void init_MPI_threads_checks(int argc, char **argv) {
     int provided;
     MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
     if (provided < MPI_THREAD_FUNNELED) {
-        std::printf("MPI does not provide required threading support\n");
+        printf("MPI does not provide required threading support\n");
         MPI_Abort(MPI_COMM_WORLD, 1);
-        std::abort();
+        abort();
     }
     int is_main_flag;
     MPI_Is_thread_main(&is_main_flag);
     if (!is_main_flag) {
-        std::printf("This thread called MPI_Init_thread but it is not the main thread\n");
+        printf("This thread called MPI_Init_thread but it is not the main thread\n");
         MPI_Abort(MPI_COMM_WORLD, -1);
+        abort();
     }
-    int rank = get_my_rank(MPI_COMM_WORLD);
-    int number_of_nodes = get_number_of_nodes();
-    MPI_Comm ACTIVE_COMM;
-    int color = (rank < number_of_nodes) ? 0 : MPI_UNDEFINED;
-    MPI_Comm_split(MPI_COMM_WORLD, color, rank, &ACTIVE_COMM);
+}
+MPI_Comm setup_active_comm(int& rank, int& number_of_nodes) {
+    MPI_Comm active_comm;
+    int world_rank = get_my_rank(MPI_COMM_WORLD);
+    int world_size = get_number_of_nodes();
+    //if number of nodes is not a multiple of 2 all processes with rank above the maximum will be included in the new communicator
+    //using color 0, otherwise with MPI_UNDEFINED they will be excluded and then they will stop
+    if (!(world_size & (world_size - 1)) == 0) {
+        int active_nodes = largest_power_of_two(world_size);
 
-    if (rank >= number_of_nodes) {
-        MPI_Finalize();
-        return 0;
+        if (world_rank == 0) {
+            fprintf(stderr,
+                    "Warning: number of processes (%d) is not a power of 2.\n"
+                    "Only the first %d ranks will participate in sorting. Others will exit.\n",
+                    world_size, active_nodes);
+        }
+
+        int color = world_rank < active_nodes ? 0 : MPI_UNDEFINED;
+        MPI_Comm_split(MPI_COMM_WORLD, color, world_rank, &active_comm);
+
+        if (color == MPI_UNDEFINED) {
+            MPI_Finalize();
+            exit(0);
+        }
+
+        rank = get_my_rank(active_comm);
+        number_of_nodes = active_nodes;
+    } else {
+        active_comm = MPI_COMM_WORLD;
+        rank = world_rank;
+        number_of_nodes = world_size;
     }
-    rank = get_my_rank(ACTIVE_COMM);
+
+    return active_comm;
+}
+
+
+int main(int argc, char **argv) {
+    init_MPI_threads_checks(argc, argv);
+    int rank, number_of_nodes;
+    MPI_Comm ACTIVE_COMM = setup_active_comm(rank, number_of_nodes);
     RunningParam running_param = parseCommandLine(argc, argv);
+    int number_of_records = check_on_array_size(rank, running_param);
     vector<Record> records;
     if (rank == 0) {
         debug_params(running_param);
-        records = generate_input_array(running_param.array_size,
+        records = generate_input_array(number_of_records,
                                        running_param.record_payload_size);
     }
-    vector<Record> sorted_records(running_param.array_size);
+    vector<Record> sorted_records(number_of_records);
     MPI_Datatype MPI_RECORD_TYPE = create_mpi_record_type();
     MPI_Barrier(ACTIVE_COMM);
     if (rank == 0) {
@@ -164,27 +209,33 @@ int main(int argc, char **argv) {
     vector<int> displs;
     vector<int> sendcounts;
     scatter_base_case(
-        number_of_nodes, ACTIVE_COMM, running_param, records, displs, sendcounts, sorted_records, MPI_RECORD_TYPE);
-    int max_level = log2(number_of_nodes);
+        number_of_nodes, ACTIVE_COMM, number_of_records, records, displs, sendcounts, sorted_records, MPI_RECORD_TYPE);
+    int max_level = static_cast<int>(log2(number_of_nodes));
     int level = 0;
     vector<int> my_senders = get_my_sender_at_all_level(rank, max_level);
     vector<MPI_Request> requests(my_senders.size());
-    int base_case = sendcounts[0];
-    for (size_t level = 0; level < my_senders.size(); ++level) {
-        int sender_at_level = my_senders[level];
-        size_t start_receive = displs[sender_at_level];
-        size_t max_num_elem_level = base_case * (1 << level);
-        MPI_Irecv(sorted_records.data() + start_receive, max_num_elem_level, MPI_RECORD_TYPE,
-                  my_senders[level], 0, ACTIVE_COMM, &requests[level]);
+    int base_case = sendcounts[rank];
+    int levels_to_receive = static_cast<int>(my_senders.size());
+    for (int i = 0; i < levels_to_receive; ++i) {
+        int sender_level = my_senders[i];
+        int receiving_point_level = displs[sender_level];
+        //given the binary structure at level "i" I will receive at most base_case * 2^i element
+        //and will be always <= array_size/2 so it will fit in an integer
+        int max_elem_level = base_case * (1 << i);
+        MPI_Irecv(sorted_records.data() + receiving_point_level, max_elem_level,
+                  MPI_RECORD_TYPE, my_senders[i], 0, ACTIVE_COMM, &requests[i]);
     }
-    // Sort the local base case in parallel with the Irecv
-    Record *my_sorting_point_start = sorted_records.data() + displs[rank];
-    sort_base_case(running_param, my_sorting_point_start, sendcounts[rank]);
-    int current_elem_sorted = sendcounts[rank];
+    // Sort the local base case in parallel with all the Irecv
+    Record *my_records_begin = sorted_records.data() + displs[rank];
+    sort_base_case(running_param, my_records_begin, sendcounts[rank]);
+    // initially only my base case is sorted
+    int sorted_partition_size = sendcounts[rank];
     while (level < max_level) {
         if (am_i_sender(rank, level, max_level)) {
             int receiver = get_my_receiver_at_level(rank, level);
-            MPI_Send(my_sorting_point_start, current_elem_sorted,
+            //send to receiver at level "level" all the data of the partition for which
+            // I am responsible
+            MPI_Send(my_records_begin, sorted_partition_size,
                      MPI_RECORD_TYPE,
                      receiver, 0, ACTIVE_COMM);
             break; // A sender no longer participates in future merge steps
@@ -194,10 +245,15 @@ int main(int argc, char **argv) {
             MPI_Wait(&requests[level], &status);
             int real_received_count;
             MPI_Get_count(&status, MPI_RECORD_TYPE, &real_received_count);
-            std::inplace_merge(my_sorting_point_start,
-                               my_sorting_point_start + current_elem_sorted,
-                               my_sorting_point_start + current_elem_sorted + real_received_count);
-            current_elem_sorted += real_received_count;
+            // At level "level", I receive a contiguous and independently sorted partition
+            // from my sender. It starts immediately after my current sorted partition:
+            // [my_records_begin, my_records_begin + sorted_partition_size - 1] is my current sorted range.
+            // The incoming sorted range begins at my_records_begin + sorted_partition_size.
+            Record *my_sorted_partition_end = my_records_begin + sorted_partition_size;
+            inplace_merge(my_records_begin,
+                          my_sorted_partition_end,
+                          my_sorted_partition_end + real_received_count);
+            sorted_partition_size += real_received_count;
         }
         level++;
     }

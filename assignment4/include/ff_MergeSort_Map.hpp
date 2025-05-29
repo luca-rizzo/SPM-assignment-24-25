@@ -162,7 +162,7 @@ public:
         : ff_Farm(
             [&]() {
                 vector<unique_ptr<ff_node> > W;
-                for (int i = 0; i < par_degree - 1; ++i)
+                for (unsigned int i = 0; i < par_degree - 1; ++i)
                     W.push_back(make_unique<Worker<T> >(data, len));
                 return W;
             }(),

@@ -14,9 +14,12 @@ using namespace std;
 int main(int argc, char **argv) {
     RunningParam running_param = parseCommandLine(argc, argv);
     debug_params(running_param);
-    vector<Record> to_sort = generate_input_array(running_param.array_size, running_param.record_payload_size);
+    vector<Record> to_sort = generate_input_array(running_param.array_size,
+                                                  running_param.record_payload_size);
     // create a farm
-    ff_MergeSort_Map farm(to_sort.data(), to_sort.size(), running_param.ff_num_threads, running_param.base_case_size);
+    ff_MergeSort_Map farm(to_sort.data(), to_sort.size(),
+                          running_param.ff_num_threads,
+                          running_param.base_case_size);
     fprintf(stderr, "STARTED\n");
     TIMERSTART(ff_merge_sort);
     if (farm.run_and_wait_end() < 0) {

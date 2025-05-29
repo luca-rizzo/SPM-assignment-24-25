@@ -2,7 +2,6 @@
 #define CMDLINE_PARAM_PARSER_H
 #include <string>
 #include <cstring>
-#include <fcntl.h>
 #include <filesystem>
 #include <getopt.h>
 
