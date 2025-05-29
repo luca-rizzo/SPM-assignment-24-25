@@ -9,6 +9,22 @@
 #include "hpc_helpers.hpp"
 #include "merge_sort_utility.hpp"
 
+#define MPI_SAFE_CALL(call, MPI_COMM) do {                                         \
+    int err = (call);                                               \
+    if (err != MPI_SUCCESS) {                                       \
+        char errstr[MPI_MAX_ERROR_STRING];                                \
+        int errlen = 0;                                                   \
+        MPI_Error_string(err, errstr, &errlen);                           \
+        fprintf(stderr,                                                   \
+        "MPI error in %s\n"                                       \
+        "  Code: %d (%.*s)\n"                                     \
+        "  Location: %s:%d\n",                                    \
+        #call, err, errlen, errstr, __FILE__, __LINE__);         \
+        MPI_Abort(MPI_COMM, err);                                   \
+        std::abort();                                                     \
+    }                                                               \
+} while(0)
+
 using namespace std;
 
 int get_my_rank(const MPI_Comm &COMM) {
@@ -61,8 +77,9 @@ void scatter_base_case(int number_of_nodes, const MPI_Comm &ACTIVE_COMM, int num
         displs[i] = start;
     }
 
-    MPI_Scatterv(records.data(), sendcounts.data(), displs.data(), MPI_RECORD_TYPE,
-                 sorted_records.data() + displs[rank], sendcounts[rank], MPI_RECORD_TYPE, 0, ACTIVE_COMM);
+    MPI_SAFE_CALL(MPI_Scatterv(records.data(), sendcounts.data(), displs.data(), MPI_RECORD_TYPE,
+                      sorted_records.data() + displs[rank], sendcounts[rank], MPI_RECORD_TYPE, 0, ACTIVE_COMM),
+                  ACTIVE_COMM);
 }
 
 MPI_Datatype create_mpi_record_type() {
@@ -151,7 +168,8 @@ void init_MPI_threads_checks(int argc, char **argv) {
         abort();
     }
 }
-MPI_Comm setup_active_comm(int& rank, int& number_of_nodes) {
+
+MPI_Comm setup_active_comm(int &rank, int &number_of_nodes) {
     MPI_Comm active_comm;
     int world_rank = get_my_rank(MPI_COMM_WORLD);
     int world_size = get_number_of_nodes();
@@ -222,8 +240,8 @@ int main(int argc, char **argv) {
         //given the binary structure at level "i" I will receive at most base_case * 2^i element
         //and will be always <= array_size/2 so it will fit in an integer
         int max_elem_level = base_case * (1 << i);
-        MPI_Irecv(sorted_records.data() + receiving_point_level, max_elem_level,
-                  MPI_RECORD_TYPE, my_senders[i], 0, ACTIVE_COMM, &requests[i]);
+        MPI_SAFE_CALL(MPI_Irecv(sorted_records.data() + receiving_point_level, max_elem_level,
+                          MPI_RECORD_TYPE, my_senders[i], 0, ACTIVE_COMM, &requests[i]), ACTIVE_COMM);
     }
     // Sort the local base case in parallel with all the Irecv
     Record *my_records_begin = sorted_records.data() + displs[rank];
@@ -235,14 +253,14 @@ int main(int argc, char **argv) {
             int receiver = get_my_receiver_at_level(rank, level);
             //send to receiver at level "level" all the data of the partition for which
             // I am responsible
-            MPI_Send(my_records_begin, sorted_partition_size,
-                     MPI_RECORD_TYPE,
-                     receiver, 0, ACTIVE_COMM);
+            MPI_SAFE_CALL(MPI_Send(my_records_begin, sorted_partition_size,
+                              MPI_RECORD_TYPE,
+                              receiver, 0, ACTIVE_COMM), ACTIVE_COMM);
             break; // A sender no longer participates in future merge steps
         }
         if (am_i_receiver(rank, level, max_level)) {
             MPI_Status status;
-            MPI_Wait(&requests[level], &status);
+            MPI_SAFE_CALL(MPI_Wait(&requests[level], &status), ACTIVE_COMM);
             int real_received_count;
             MPI_Get_count(&status, MPI_RECORD_TYPE, &real_received_count);
             // At level "level", I receive a contiguous and independently sorted partition
