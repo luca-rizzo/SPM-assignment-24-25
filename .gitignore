@@ -4,3 +4,4 @@ CMakeLists.txt
 *.ipynb
 *.venv
 *zip*
+assignment4/out/*
