@@ -23,32 +23,32 @@ struct Task {
 
 template<typename T>
 struct Worker : ff_minode_t<Task> {
-    Worker(T *data, size_t len) : data(data), len(len) {
+    Worker(T *data, size_t len) : to_sort(data), to_sort_len(len) {
     }
 
     Task *svc(Task *in) override {
         if (in->type == TaskType::SORT) {
-            std::sort(data + in->start, data + in->end + 1);
+            std::sort(to_sort + in->start, to_sort + in->end + 1);
         } else {
             // MERGE
-            if (data[in->middle] <= data[in->middle + 1])
+            if (to_sort[in->middle] <= to_sort[in->middle + 1])
                 return in;
-            std::inplace_merge(data + in->start,
-                               data + in->middle + 1,
-                               data + in->end + 1);
+            std::inplace_merge(to_sort + in->start,
+                               to_sort + in->middle + 1,
+                               to_sort + in->end + 1);
         }
         return in;
     }
 
-    T *data;
-    size_t len;
+    T *to_sort;
+    size_t to_sort_len;
 };
 
 template<typename T>
 struct Master : ff_monode_t<Task> {
     Master(T *data, const size_t len, int _par_degree, size_t _base_case_size)
-        : data(data),
-          len(len),
+        : to_sort(data),
+          to_sort_len(len),
           num_workers(_par_degree - 1),
           par_degree(_par_degree) {
         base_case_size = (_base_case_size == 0)
@@ -85,7 +85,7 @@ struct Master : ff_monode_t<Task> {
     Task *svc(Task *in) override {
         if (in == nullptr) {
             size_t i = 0;
-            for (; i + base_case_size < len; i += base_case_size) {
+            for (; i + base_case_size < to_sort_len; i += base_case_size) {
                 size_t end = i + base_case_size - 1;
                 Task &t = reusable_tasks[level_merges_expected];
                 t.type = TaskType::SORT;
@@ -99,8 +99,8 @@ struct Master : ff_monode_t<Task> {
             Task &emitter_base_case = reusable_tasks[level_merges_expected];
             emitter_base_case.type = TaskType::SORT;
             emitter_base_case.start = i;
-            emitter_base_case.end = len - 1;
-            std::sort(data + emitter_base_case.start, data + emitter_base_case.end + 1);
+            emitter_base_case.end = to_sort_len - 1;
+            std::sort(to_sort + emitter_base_case.start, to_sort + emitter_base_case.end + 1);
             current_level_merge.push_back(&emitter_base_case);
             return GO_ON;
         }
@@ -117,9 +117,9 @@ struct Master : ff_monode_t<Task> {
                 current_level_merge.pop_front();
                 Task *r = current_level_merge.front();
                 current_level_merge.pop_front();
-                std::inplace_merge(data + l->start,
-                                   data + l->end + 1,
-                                   data + r->end + 1);
+                std::inplace_merge(to_sort + l->start,
+                                   to_sort + l->end + 1,
+                                   to_sort + r->end + 1);
                 return EOS;
             }
 
@@ -144,8 +144,8 @@ struct Master : ff_monode_t<Task> {
         return GO_ON;
     }
 
-    T *data;
-    size_t len;
+    T *to_sort;
+    size_t to_sort_len;
     unsigned int num_workers;
     unsigned int par_degree;
     size_t base_case_size;
