@@ -4,7 +4,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
 #SBATCH --time=00:30:00
-#SBATCH --output=shared_mem_speedup
+#SBATCH --output=./out/shared_mem_speedup_log
 
 make cleanall
 make ff_merge_sort

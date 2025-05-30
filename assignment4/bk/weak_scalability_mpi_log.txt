@@ -1,0 +1,14 @@
+rm -fr std_sort mpi_merge_sort ff_merge_sort
+mpicxx -std=c++20 -I ~/fastflow -I ./include -Wall  -O3 -ffast-math -march=native -o mpi_merge_sort mpi_merge_sort.cpp -pthread
+Running: srun -N 1 -n 1 ./mpi_merge_sort -s  -t 16 -r 1
+Running: srun -N 1 -n 1 ./mpi_merge_sort -s 40000000 -t 16 -r 1
+Running: srun -N 1 -n 1 ./mpi_merge_sort -s 40000000 -t 16 -r 1
+Running: srun -N 2 -n 2 ./mpi_merge_sort -s 80000000 -t 16 -r 1
+Running: srun -N 1 -n 1 ./mpi_merge_sort -s 80000000 -t 16 -r 1
+Running: srun -N 4 -n 4 ./mpi_merge_sort -s 160000000 -t 16 -r 1
+Running: srun -N 1 -n 1 ./mpi_merge_sort -s 160000000 -t 16 -r 1
+Running: srun -N 8 -n 8 ./mpi_merge_sort -s 320000000 -t 16 -r 1
+Running: srun -N 1 -n 1 ./mpi_merge_sort -s 320000000 -t 16 -r 1
+Running: srun -N 8 -n 16 ./mpi_merge_sort -s 640000000 -t 16 -r 1
+Running: srun -N 8 -n 32 ./mpi_merge_sort -s 1280000000 -t 16 -r 1
+slurmstepd-node01: error: *** JOB 257252 ON node01 CANCELLED AT 2025-05-30T09:47:37 ***

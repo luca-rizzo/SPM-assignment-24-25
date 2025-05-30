@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=weak_scalability_mpi
 #SBATCH --nodes=8
-#SBATCH --ntasks=16
+#SBATCH --ntasks=32
 #SBATCH --time=00:30:00
 #SBATCH --output=./out/weak_scalability_mpi_log.txt
 
@@ -26,7 +26,7 @@ run_and_measure_mpi() {
   local csv_line="mpi_merge_sort,$num_nodes,$num_processes,$num_ff_threads,$size"
 
   for ((i = 1; i <= NUM_RUNS; i++)); do
-    output=$(srun --mpi=pmix -N "$num_nodes" -n "$num_processes" "$cmd" 2>/dev/null)
+    output=$(eval srun --mpi=pmix -N "$num_nodes" -n "$num_processes" "$cmd" 2>/dev/null)
     current_run_time=$(echo "$output" | grep -i "elapsed time" | sed 's/.*: \(.*\)s/\1/')
     csv_line="$csv_line,$current_run_time"
   done
@@ -53,4 +53,5 @@ for n in 2 4; do
   num_processes=$((8 * n))
   dataset=$((BASE_DATASET * num_processes))
   run_and_measure_mpi 8 "$num_processes" "$BASE_THREADS" "$dataset"
+  run_and_measure_mpi 1 1 "$BASE_THREADS" "$dataset"
 done
