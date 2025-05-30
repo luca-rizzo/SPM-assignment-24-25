@@ -27,7 +27,7 @@ run_and_measure_mpi() {
   local csv_line="mpi_merge_sort,$num_nodes,$num_processes,$num_ff_threads,$size"
 
   for ((i = 1; i <= NUM_RUNS; i++)); do
-    output=$(eval srun --mpi=pmix -N "$num_nodes" -n "$num_processes" "$cmd" 2>./out/weak_scalability_mpi_log.txt)
+    output=$(eval srun --mpi=pmix -N "$num_nodes" -n "$num_processes" "$cmd" 2>>./out/weak_scalability_mpi_log.txt)
     current_run_time=$(echo "$output" | grep -i "elapsed time" | sed 's/.*: \(.*\)s/\1/')
     csv_line="$csv_line,$current_run_time"
   done
@@ -38,9 +38,6 @@ run_and_measure_mpi() {
 # The S of the formula
 BASE_DATASET=40000000
 BASE_THREADS=32
-
-# Base case
-run_and_measure_mpi 1 1 "$BASE_THREADS" "$BASE_SIZE"
 
 # Weak scalability: increase input size with number of nodes
 for n in 1 2 4 8; do

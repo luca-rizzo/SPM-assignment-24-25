@@ -189,7 +189,27 @@ public:
             make_unique<Master<T> >(data, len, par_degree, base_case_size)) {
         this->remove_collector();
         this->wrap_around();
-        this->ff_farm::no_mapping();
+
+        if (multiple_process_in_this_node()) {
+            // Multiple MPI processes are running on this node.
+            // If we don't disable FastFlow's default thread-to-core mapping,
+            // processes like proc1 and proc2 may each allocate their threads
+            // on the same set of cores (according to the fixed mapping policy),
+            // causing severe core overlap and contention.
+            // Disabling the mapping allows the OS to schedule threads on free cores,
+            // which generally improves overall parallel performance.
+            fprintf(stderr, "Disabling default mapping (multiple MPI processes on this node)\n");
+            this->ff_farm::no_mapping();
+        }
+    }
+private:
+    bool multiple_process_in_this_node() {
+        MPI_Comm shared_comm;
+        MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shared_comm);
+
+        int local_rank_count;
+        MPI_Comm_size(shared_comm, &local_rank_count);
+        return local_rank_count > 1;
     }
 };
 

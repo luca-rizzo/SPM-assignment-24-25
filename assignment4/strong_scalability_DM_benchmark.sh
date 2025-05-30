@@ -27,7 +27,7 @@ run_and_measure_mpi() {
   local csv_line="mpi_merge_sort,$num_nodes,$num_processes,$num_ff_threads,$size"
 
   for ((i = 1; i <= NUM_RUNS; i++)); do
-    output=$(eval srun --mpi=pmix -N "$num_nodes" -n "$num_processes" "$cmd" 2>./out/strong_scalability_mpi_log.txt)
+    output=$(eval srun --mpi=pmix -N "$num_nodes" -n "$num_processes" "$cmd" 2>>./out/strong_scalability_mpi_log.txt)
     current_run_time=$(echo "$output" | grep -i "elapsed time" | sed 's/.*: \(.*\)s/\1/')
     csv_line="$csv_line,$current_run_time"
   done
