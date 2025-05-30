@@ -25,6 +25,15 @@
     }                                                               \
 } while(0)
 
+#define MPI_TIME_AND_LOG(label, call, rank) do {                            \
+    double t_start = MPI_Wtime();                                       \
+    call;                                                               \
+    if (rank == 0) {                                              \
+        double t_end = MPI_Wtime();                               \
+        fprintf(stderr, "%s time: %f s\n", label, t_end - t_start);     \
+    }                                                                   \
+} while(0)
+
 using namespace std;
 
 int get_my_rank(const MPI_Comm &COMM) {
@@ -120,6 +129,7 @@ vector<int> get_my_sender_at_all_level(int rank, int max_level) {
 void sort_base_case(const RunningParam &running_param,
                     Record *my_sorting_point_start,
                     int my_send_count) {
+    cout << my_send_count << endl;
     // create a map
     ff_MergeSort_Map farm(my_sorting_point_start, my_send_count, running_param.ff_num_threads);
 
@@ -227,27 +237,29 @@ int main(int argc, char **argv) {
     vector<int> displs;
     vector<int> sendcounts;
     scatter_base_case(
-        number_of_nodes, ACTIVE_COMM, number_of_records, records, displs, sendcounts, sorted_records, MPI_RECORD_TYPE);
+        number_of_nodes, ACTIVE_COMM, number_of_records, records, displs, sendcounts, sorted_records,
+        MPI_RECORD_TYPE);
     int max_level = static_cast<int>(log2(number_of_nodes));
     int level = 0;
     vector<int> my_senders = get_my_sender_at_all_level(rank, max_level);
     vector<MPI_Request> requests(my_senders.size());
-    int base_case = sendcounts[rank];
+    int base_case_size = sendcounts[rank];
     int levels_to_receive = static_cast<int>(my_senders.size());
     for (int i = 0; i < levels_to_receive; ++i) {
         int sender_level = my_senders[i];
         int receiving_point_level = displs[sender_level];
         //given the binary structure at level "i" I will receive at most base_case * 2^i element
         //and will be always <= array_size/2 so it will fit in an integer
-        int max_elem_level = base_case * (1 << i);
+        int max_elem_level = base_case_size * (1 << i);
         MPI_SAFE_CALL(MPI_Irecv(sorted_records.data() + receiving_point_level, max_elem_level,
                           MPI_RECORD_TYPE, my_senders[i], 0, ACTIVE_COMM, &requests[i]), ACTIVE_COMM);
     }
     // Sort the local base case in parallel with all the Irecv
     Record *my_records_begin = sorted_records.data() + displs[rank];
-    sort_base_case(running_param, my_records_begin, sendcounts[rank]);
+    MPI_TIME_AND_LOG("Base case sorting",
+                     sort_base_case(running_param, my_records_begin, base_case_size), rank);
     // initially only my base case is sorted
-    int sorted_partition_size = sendcounts[rank];
+    int sorted_partition_size = base_case_size;
     while (level < max_level) {
         if (am_i_sender(rank, level, max_level)) {
             int receiver = get_my_receiver_at_level(rank, level);
