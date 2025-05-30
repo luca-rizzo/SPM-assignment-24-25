@@ -8,6 +8,15 @@
 #include <ff/ff.hpp>
 #include <ff/farm.hpp>
 #include <algorithm>
+#include <iostream>
+#include <chrono> // in cima al file
+#include <thread>
+#include <ff/ff.hpp>
+#include <ff/farm.hpp>
+#include <thread>
+#include <unistd.h>
+#include <sched.h>
+
 
 using namespace ff;
 using namespace std;
@@ -26,19 +35,29 @@ struct Worker : ff_minode_t<Task> {
     Worker(T *data, size_t len) : to_sort(data), to_sort_len(len) {
     }
 
+    void print_thread_cpu_mapping() {
+        ssize_t ff_id = get_my_id();
+        int core_id = sched_getcpu();
+        std::cerr << "[Worker] ff_id = " << ff_id
+                << ", core = " << core_id
+                << std::endl;
+    }
+
     Task *svc(Task *in) override {
+        //print_thread_cpu_mapping();
         if (in->type == TaskType::SORT) {
             std::sort(to_sort + in->start, to_sort + in->end + 1);
         } else {
-            // MERGE
             if (to_sort[in->middle] <= to_sort[in->middle + 1])
                 return in;
             std::inplace_merge(to_sort + in->start,
                                to_sort + in->middle + 1,
                                to_sort + in->end + 1);
         }
+
         return in;
     }
+
 
     T *to_sort;
     size_t to_sort_len;
@@ -113,6 +132,7 @@ struct Master : ff_monode_t<Task> {
 
             // Final merge of last two sorted blocks
             if (current_level_merge.size() == 2) {
+                terminate_useless_worker();
                 Task *l = current_level_merge.front();
                 current_level_merge.pop_front();
                 Task *r = current_level_merge.front();
@@ -169,6 +189,7 @@ public:
             make_unique<Master<T> >(data, len, par_degree, base_case_size)) {
         this->remove_collector();
         this->wrap_around();
+        this->ff_farm::no_mapping();
     }
 };
 

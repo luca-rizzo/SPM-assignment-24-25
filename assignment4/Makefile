@@ -1,6 +1,6 @@
 CXX	= g++ -std=c++20
 CXX_MPI = mpicxx -std=c++20
-OPTIMIZE_FLAGS  += -O3 -ffast-math -march=native
+OPTIMIZE_FLAGS  += -O3 -ffast-math
 ifdef FF_HOME
     INCS += -I$(FF_HOME)
 else
