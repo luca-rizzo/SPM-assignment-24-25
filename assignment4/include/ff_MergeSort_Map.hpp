@@ -178,18 +178,25 @@ struct Master : ff_monode_t<Task> {
 template<typename T>
 class ff_MergeSort_Map : public ff_Farm<void> {
 public:
+
     ff_MergeSort_Map(T *data, size_t len, unsigned int par_degree, unsigned int base_case_size = 0)
         : ff_Farm(
-            [&]() {
-                vector<unique_ptr<ff_node> > W;
-                for (unsigned int i = 0; i < par_degree - 1; ++i)
-                    W.push_back(make_unique<Worker<T> >(data, len));
-                return W;
-            }(),
-            make_unique<Master<T> >(data, len, par_degree, base_case_size)) {
+              [&]() {
+                  vector<unique_ptr<ff_node>> W;
+                  for (unsigned int i = 0; i < par_degree - 1; ++i)
+                      W.push_back(make_unique<Worker<T>>(data, len));
+                  return W;
+              }(),
+              make_unique<Master<T>>(data, len, par_degree, base_case_size)) {
         this->remove_collector();
         this->wrap_around();
+    }
 
+#ifdef MPI_VERSION
+
+    ff_MergeSort_Map(T *data, size_t len, unsigned int par_degree, MPI_Comm comm, unsigned int base_case_size = 0)
+        : ff_MergeSort_Map(data, len, par_degree, base_case_size) {
+        active_comm = comm;
         if (multiple_process_in_this_node()) {
             // Multiple MPI processes are running on this node.
             // If we don't disable FastFlow's default thread-to-core mapping,
@@ -202,15 +209,21 @@ public:
             this->ff_farm::no_mapping();
         }
     }
+
 private:
+    MPI_Comm active_comm;
+
     bool multiple_process_in_this_node() {
         MPI_Comm shared_comm;
-        MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shared_comm);
+        MPI_Comm_split_type(active_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shared_comm);
 
         int local_rank_count;
         MPI_Comm_size(shared_comm, &local_rank_count);
+        MPI_Comm_free(&shared_comm);
         return local_rank_count > 1;
     }
+#endif
 };
+
 
 #endif // FF_MERGESORT_FARM_H

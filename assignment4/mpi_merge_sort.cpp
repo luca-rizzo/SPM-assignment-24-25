@@ -69,13 +69,13 @@ bool am_i_sender(int rank, int level, int max_level) {
 }
 
 void scatter_base_case(int number_of_nodes, const MPI_Comm &ACTIVE_COMM, int number_of_records,
-                       const vector<Record> &records, vector<int> &displs,
-                       vector<int> &sendcounts, vector<Record> &sorted_records,
-                       MPI_Datatype MPI_RECORD_TYPE) {
+                              const vector<Record> &records, vector<int> &displs,
+                              vector<int> &sendcounts, int num_senders,
+                              vector<Record> &sorted_records,
+                              MPI_Datatype MPI_RECORD_TYPE) {
     int rank;
     MPI_Comm_rank(ACTIVE_COMM, &rank);
     int chunk_size = (number_of_records + number_of_nodes - 1) / number_of_nodes;
-
 
     sendcounts.resize(number_of_nodes);
     displs.resize(number_of_nodes);
@@ -86,9 +86,13 @@ void scatter_base_case(int number_of_nodes, const MPI_Comm &ACTIVE_COMM, int num
         sendcounts[i] = end - start;
         displs[i] = start;
     }
-
+    // If I have 'num_senders' senders, I may receive up to 2^num_senders times my base chunk size during merging.
+    // Therefore, the maximum buffer size needed is either that value or, in the special case where rank == 0
+    // (i.e., I am the root and responsible for merging the entire array), the full size of the input (records.size()).
+    int max_buff_size = max(sendcounts[rank] * (1 << num_senders), static_cast<int>(records.size()));
+    sorted_records.resize(max_buff_size);
     MPI_SAFE_CALL(MPI_Scatterv(records.data(), sendcounts.data(), displs.data(), MPI_RECORD_TYPE,
-                      sorted_records.data() + displs[rank], sendcounts[rank], MPI_RECORD_TYPE, 0, ACTIVE_COMM),
+                      sorted_records.data(), sendcounts[rank], MPI_RECORD_TYPE, 0, ACTIVE_COMM),
                   ACTIVE_COMM);
 }
 
@@ -129,9 +133,9 @@ vector<int> get_my_sender_at_all_level(int rank, int max_level) {
 
 void sort_base_case(const RunningParam &running_param,
                     Record *my_sorting_point_start,
-                    int my_send_count) {
+                    int my_send_count, MPI_Comm ACTIVE_COMM) {
     // create a map
-    ff_MergeSort_Map farm(my_sorting_point_start, my_send_count, running_param.ff_num_threads);
+    ff_MergeSort_Map farm(my_sorting_point_start, my_send_count, running_param.ff_num_threads, ACTIVE_COMM);
 
     if (farm.run_and_wait_end() < 0) {
         error("running the farm\n");
@@ -216,7 +220,7 @@ MPI_Comm setup_active_comm(int &rank, int &number_of_nodes) {
 
 
 void merging_phase(int rank, const MPI_Comm &ACTIVE_COMM, const MPI_Datatype &MPI_RECORD_TYPE,
-                   int max_level, vector<MPI_Request> requests, Record *my_records_begin, int sorted_partition_size) {
+                   int max_level, vector<MPI_Request>& requests, Record *my_records_begin, int sorted_partition_size) {
     int level = 0;
     while (level < max_level) {
         if (am_i_sender(rank, level, max_level)) {
@@ -259,7 +263,6 @@ int main(int argc, char **argv) {
         records = generate_input_array(number_of_records,
                                        running_param.record_payload_size);
     }
-    vector<Record> sorted_records(number_of_records);
     MPI_Datatype MPI_RECORD_TYPE = create_mpi_record_type();
     MPI_Barrier(ACTIVE_COMM);
     if (rank == 0) {
@@ -268,17 +271,21 @@ int main(int argc, char **argv) {
     double t_start = MPI_Wtime();
     vector<int> displs;
     vector<int> sendcounts;
-    MPI_TIME_AND_LOG("Scatterv phase", scatter_base_case(
-                         number_of_nodes, ACTIVE_COMM, number_of_records, records, displs, sendcounts, sorted_records,
-                         MPI_RECORD_TYPE), rank);
     int max_level = static_cast<int>(log2(number_of_nodes));
     vector<int> my_senders = get_my_sender_at_all_level(rank, max_level);
+    vector<Record> sorted_records;
+    MPI_TIME_AND_LOG("Scatterv phase", scatter_base_case(
+                         number_of_nodes, ACTIVE_COMM, number_of_records, records, displs,
+                         sendcounts,
+                         my_senders.size(),
+                         sorted_records,
+                         MPI_RECORD_TYPE), rank);
     vector<MPI_Request> requests(my_senders.size());
     int base_case_size = sendcounts[rank];
     int levels_to_receive = static_cast<int>(my_senders.size());
     for (int i = 0; i < levels_to_receive; ++i) {
         int sender_level = my_senders[i];
-        int receiving_point_level = displs[sender_level];
+        int receiving_point_level = displs[sender_level] - displs[rank];
         //given the binary structure at level "i" I will receive at most base_case * 2^i element
         //and will be always <= array_size/2 so it will fit in an integer
         int max_elem_level = base_case_size * (1 << i);
@@ -286,9 +293,9 @@ int main(int argc, char **argv) {
                           MPI_RECORD_TYPE, my_senders[i], 0, ACTIVE_COMM, &requests[i]), ACTIVE_COMM);
     }
     // Sort the local base case in parallel with all the Irecv
-    Record *my_records_begin = sorted_records.data() + displs[rank];
+    Record *my_records_begin = sorted_records.data();
     MPI_TIME_AND_LOG("Base case phase",
-                     sort_base_case(running_param, my_records_begin, base_case_size), rank);
+                     sort_base_case(running_param, my_records_begin, base_case_size, ACTIVE_COMM), rank);
     // initially only my base case is sorted
     MPI_TIME_AND_LOG("Merge phase",
                      merging_phase(rank, ACTIVE_COMM, MPI_RECORD_TYPE, max_level, requests, my_records_begin,

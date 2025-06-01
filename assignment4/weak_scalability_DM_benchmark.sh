@@ -46,10 +46,3 @@ for n in 1 2 4 8; do
 
   run_and_measure_mpi 1 1 "$BASE_THREADS" "$dataset"
 done
-
-for n in 2 4; do
-  num_processes=$((8 * n))
-  dataset=$((BASE_DATASET * num_processes))
-  run_and_measure_mpi 8 "$num_processes" "$BASE_THREADS" "$dataset"
-  run_and_measure_mpi 1 1 "$BASE_THREADS" "$dataset"
-done

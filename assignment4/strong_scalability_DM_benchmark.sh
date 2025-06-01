@@ -42,10 +42,4 @@ for DATASET_SIZE in 10K 100K 1M 50M 300M; do
   for n in 1 2 4 8; do
     run_and_measure_mpi "$n" "$n" "$BASE_THREADS" "$DATASET_SIZE"
   done
-
-  for n in 2 4; do
-    num_processes=$((8 * n))
-    run_and_measure_mpi 8 "$num_processes" "$BASE_THREADS" "$DATASET_SIZE"
-  done
-
 done
