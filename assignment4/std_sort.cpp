@@ -21,4 +21,5 @@ int main(int argc, char **argv) {
         });
     TIMERSTOP(std_sort);
     print_sort_res(to_sort);
+    free_input_array(to_sort);
 }

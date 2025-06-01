@@ -47,4 +47,11 @@ inline vector<Record> generate_input_array(size_t N, size_t payload_size) {
     return records;
 }
 
+inline void free_input_array(std::vector<Record>& records) {
+    for (auto& record : records) {
+        delete[] record.payload;
+        record.payload = nullptr;
+    }
+}
+
 #endif //GENERATE_INPUT_ARRAY_H
