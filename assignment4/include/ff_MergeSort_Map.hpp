@@ -99,13 +99,14 @@ struct Master : ff_monode_t<Task> {
     Task *svc(Task *in) override {
         if (in == nullptr) {
             size_t i = 0;
+            int j = 0;
             for (; i + base_case_size < to_sort_len; i += base_case_size) {
                 size_t end = i + base_case_size - 1;
                 Task &t = reusable_tasks[level_merges_expected];
                 t.type = TaskType::SORT;
                 t.start = i;
                 t.end = end;
-                ff_send_out(&t);
+                ff_send_out_to(&t, j++);
                 current_level_merge.push_back(&t);
                 level_merges_expected++;
             }
