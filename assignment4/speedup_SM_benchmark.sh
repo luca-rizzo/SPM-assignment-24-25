@@ -8,6 +8,12 @@
 #SBATCH --exclusive
 #SBATCH --output=./out/shared_mem_speedup_log.txt
 
+cd ./include/ff || exit
+
+echo y | ./mapping_string.sh
+
+cd ../..
+
 make cleanall
 make ff_merge_sort
 make std_sort
@@ -30,7 +36,7 @@ run_and_measure() {
   local csv_line="$target,$num_threads,$dataset"
 
   for ((i = 1; i <= NUM_RUNS; i++)); do
-    output=$(eval "$cmd 2>./out/shared_mem_speedup_log.txt")
+    output=$(eval "$cmd" 2>>./out/shared_mem_speedup_log.txt)
     current_run_time=$(echo "$output" | grep -i "elapsed time" | sed 's/.*: \(.*\)s/\1/')
     csv_line="$csv_line,$current_run_time"
   done

@@ -21,40 +21,4 @@ inline void print_sort_res(const vector<Record> &sorted) {
         fprintf(stderr, "Sorting failed\n");
     }
 }
-
-inline bool second_bigger(const Record &a, const Record &b) {
-    return a.key < b.key;
-}
-
-//merge the two part
-//first is vector[start, middle]
-//second is vector[middle + 1, end]
-inline void merge(vector<reference_wrapper<Record> > &to_sort, size_t start, size_t middle, size_t end) {
-    vector<reference_wrapper<Record> > temp;
-    temp.reserve(end - start + 1);
-
-    size_t left = start;
-    size_t right = middle + 1;
-
-    while (left <= middle && right <= end) {
-        if (second_bigger(to_sort[left].get(), to_sort[right].get())) {
-            temp.push_back(to_sort[left++]);
-        } else {
-            temp.push_back(to_sort[right++]);
-        }
-    }
-
-    while (left <= middle) {
-        temp.push_back(to_sort[left++]);
-    }
-
-    while (right <= end) {
-        temp.push_back(to_sort[right++]);
-    }
-
-    // Copy back the sorted subrange
-    for (size_t i = 0; i < temp.size(); ++i) {
-        to_sort[start + i] = temp[i];
-    }
-}
 #endif //MERGE_SORT_UTILITY_H

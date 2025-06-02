@@ -6,8 +6,6 @@
 #include "generate_input_array.hpp"
 #include "merge_sort_utility.hpp"
 
-#define CUTOFF 2000
-
 using namespace std;
 
 int main(int argc, char **argv) {
@@ -21,5 +19,5 @@ int main(int argc, char **argv) {
         });
     TIMERSTOP(std_sort);
     print_sort_res(to_sort);
-    //free_input_array(to_sort);
+    free_input_array(to_sort);
 }

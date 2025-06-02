@@ -306,7 +306,7 @@ int main(int argc, char **argv) {
         cout << "# elapsed time (mpi_merge_sort): "
                 << (t_stop - t_start) << "s" << endl;
         print_sort_res(sorted_records);
-        //free_input_array(records);
+        free_input_array(records);
     }
     MPI_Type_free(&MPI_RECORD_TYPE);
     MPI_Finalize();

@@ -9,7 +9,7 @@
 #include <ff/farm.hpp>
 #include <algorithm>
 #include <iostream>
-#include <chrono> // in cima al file
+#include <chrono>
 #include <unistd.h>
 
 
