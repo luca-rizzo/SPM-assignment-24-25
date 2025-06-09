@@ -1,0 +1,8 @@
+target,num_nodes,num_processes,num_ff_threads,size,time1,time2
+mpi_merge_sort,1,1,16,40000000,1.13072,1.13074
+mpi_merge_sort,2,2,16,80000000,2.76905,2.76768
+mpi_merge_sort,1,1,16,80000000,2.28203,2.28634
+mpi_merge_sort,4,4,16,160000000,6.03863,6.01933
+mpi_merge_sort,1,1,16,160000000,4.64475,4.64356
+mpi_merge_sort,8,8,16,320000000,12.5239,12.5262
+mpi_merge_sort,1,1,16,320000000,9.00208,9.46008
