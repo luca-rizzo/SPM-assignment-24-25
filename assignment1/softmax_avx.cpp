@@ -2,6 +2,7 @@
 #include <vector>
 #include <random>
 #include <algorithm>
+#include <avxintrin.h>
 #include <limits>
 #include <hpc_helpers.hpp>
 #include <avx_mathfun.h>
@@ -67,6 +68,7 @@ float avx_max(const float *data, size_t length) {
         __m256i mask = remaining_mask_table[remaining - 1];
         //load element using mask
         __m256 remaining_reg = _mm256_maskload_ps(data + i, mask);
+        // we must load element that do not interfere with maximum
         __m256 neg_inf_vec = _mm256_set1_ps(-INFINITY);
         //use blend to maintain only significant element in the registry for in max search
         __m256 vec = _mm256_blendv_ps(neg_inf_vec, remaining_reg, _mm256_castsi256_ps(mask));

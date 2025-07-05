@@ -58,12 +58,18 @@ int get_number_of_nodes() {
 bool am_i_receiver(int rank, int level, int max_level) {
     if (level >= max_level)
         return false;
-    return (rank % (1 << (level + 1))) == 0;
+    // At each level, processes are grouped into blocks of size 2^(level + 1).
+    // Within each block:
+    // - The first process (rank % 2^(level + 1) == 0) acts as the receiver.
+    return rank % (1 << (level + 1)) == 0;
 }
 
 bool am_i_sender(int rank, int level, int max_level) {
     if (level >= max_level)
         return false;
+    // At each level, processes are grouped into blocks of size 2^(level + 1).
+    // Within each block:
+    // - The process halfway through the block (rank % 2^(level + 1) == 2^level) acts as the sender.
     int group_size = 1 << (level + 1);
     return (rank % group_size) == (1 << level);
 }
